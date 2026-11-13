@@ -443,7 +443,7 @@ def send_line_alert(device: dict[str, Any], device_id: str, coverage: float, ima
          f"เหตุผล: {alert_reason}\n{coverage_text}"
          f"ระดับน้ำ: {water_text} · การไหล: {flow_text}"}]
     # Broadcast is text-only by default; a hosted image URL is optional.
-    origin = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+    origin = public_base_url()
     if origin and image_url:
         image_url_public = f"{origin}{image_url}"
         messages.append({"type": "image", "originalContentUrl": image_url_public,
@@ -459,6 +459,11 @@ def send_line_alert(device: dict[str, Any], device_id: str, coverage: float, ima
         status = getattr(response, "status_code", None)
         logger.warning("LINE delivery failed (%s)", f"HTTP {status}" if status else exc.__class__.__name__)
         return False, f"send_failed{':HTTP_' + str(status) if status else ''}"
+
+
+def public_base_url() -> str:
+    """Use an explicit URL, or Render's public service URL when available."""
+    return (os.getenv("PUBLIC_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
 
 
 def public_capture_image_token(capture_id: str) -> str | None:
@@ -529,7 +534,7 @@ def health() -> dict[str, Any]:
                           "max_age_days": CAPTURE_RETENTION_DAYS,
                           "max_image_storage_mb": MAX_CAPTURE_STORAGE_BYTES // (1024 * 1024)},
             "line_configured": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
-            "line_image_configured": bool(os.getenv("PUBLIC_BASE_URL", "").strip() and public_capture_image_token("health-check")),
+            "line_image_configured": bool(public_base_url() and public_capture_image_token("health-check")),
             "line_delivery": "broadcast_to_oa_friends"}
 
 
