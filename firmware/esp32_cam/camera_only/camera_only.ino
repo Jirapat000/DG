@@ -14,6 +14,7 @@ static const uint8_t API_RETRIES = 3;
 // AI Thinker ESP32-CAM pin map.
 static const int PWDN_GPIO_NUM = 32;
 static const int RESET_GPIO_NUM = -1;
+static const int FLASH_LED_GPIO_NUM = 4;
 static const int XCLK_GPIO_NUM = 0;
 static const int SIOD_GPIO_NUM = 26;
 static const int SIOC_GPIO_NUM = 27;
@@ -174,6 +175,9 @@ void setup() {
   delay(500);
   Serial.println("Drain Watch camera-only firmware");
   Serial.println("Sensors: disabled/not included");
+  pinMode(FLASH_LED_GPIO_NUM, OUTPUT);
+  digitalWrite(FLASH_LED_GPIO_NUM, HIGH);
+  Serial.println("Camera flash LED: on while the board is powered");
 
   cameraReady = setupCamera();
   if (!cameraReady) return;

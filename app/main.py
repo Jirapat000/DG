@@ -18,9 +18,9 @@ from typing import Any
 import numpy as np
 import requests
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from PIL import Image, UnidentifiedImageError
 from shapely.geometry import Polygon
 from starlette.concurrency import run_in_threadpool
@@ -120,6 +120,12 @@ def init_db() -> None:
         )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_device_time ON captures(device_id, received_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_time ON captures(received_at DESC)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS capture_commands (
+            id TEXT PRIMARY KEY, device_id TEXT NOT NULL, status TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            capture_id TEXT, result_json TEXT, error TEXT
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_capture_commands_device_status ON capture_commands(device_id, status, created_at)")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(captures)")}
         for name, sql_type in (("water_level", "INTEGER"), ("flow_rate", "REAL"), ("flow_status", "TEXT")):
             if name not in columns:
@@ -322,6 +328,60 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Drain Watch API", version="0.1.0", lifespan=lifespan)
 
 
+def require_device_token(device_id: str, token: str) -> None:
+    expected = DEVICE_TOKENS.get(device_id)
+    if APP_ENV == "production" and not expected:
+        raise HTTPException(503, "Device token is not configured")
+    if expected and not secrets.compare_digest(token, expected):
+        raise HTTPException(401, "Invalid device token")
+
+
+@app.post("/api/capture-commands", dependencies=[Depends(require_admin)])
+def create_capture_command(device_id: str = Form("drain-01")) -> dict[str, Any]:
+    if device_id not in devices_config():
+        raise HTTPException(404, "Unknown device")
+    now = datetime.now(timezone.utc).isoformat()
+    command_id = str(uuid.uuid4())
+    with db() as conn:
+        conn.execute("DELETE FROM capture_commands WHERE created_at < ?", ((datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),))
+        conn.execute("UPDATE capture_commands SET status='expired',updated_at=? WHERE device_id=? AND status='claimed' AND updated_at < ?",
+                     (now, device_id, (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()))
+        active = conn.execute("SELECT id,status FROM capture_commands WHERE device_id=? AND status IN ('queued','claimed') ORDER BY created_at DESC LIMIT 1", (device_id,)).fetchone()
+        if active:
+            return {"id": active["id"], "device_id": device_id, "status": active["status"]}
+        conn.execute("INSERT INTO capture_commands(id,device_id,status,created_at,updated_at) VALUES(?,?,?,?,?)",
+                     (command_id, device_id, "queued", now, now))
+    return {"id": command_id, "device_id": device_id, "status": "queued"}
+
+
+@app.get("/api/capture-commands/{command_id}", dependencies=[Depends(require_admin)])
+def get_capture_command(command_id: str) -> dict[str, Any]:
+    with db() as conn:
+        row = conn.execute("SELECT * FROM capture_commands WHERE id=?", (command_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Capture command not found")
+    return {"id": row["id"], "device_id": row["device_id"], "status": row["status"],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+            "capture_id": row["capture_id"], "result": json.loads(row["result_json"]) if row["result_json"] else None,
+            "error": row["error"]}
+
+
+@app.get("/api/devices/{device_id}/capture-command", response_class=PlainTextResponse)
+def poll_capture_command(device_id: str, x_device_token: str = Header(default="")) -> str:
+    require_device_token(device_id, x_device_token)
+    now = datetime.now(timezone.utc).isoformat()
+    with db() as conn:
+        # A queued command older than 10 minutes is stale. Claimed commands are
+        # not reissued, preventing duplicate real captures and LINE alerts.
+        conn.execute("UPDATE capture_commands SET status='expired',updated_at=? WHERE device_id=? AND status='queued' AND created_at < ?",
+                     (now, device_id, (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()))
+        row = conn.execute("SELECT id FROM capture_commands WHERE device_id=? AND status='queued' ORDER BY created_at LIMIT 1", (device_id,)).fetchone()
+        if not row:
+            return "NONE"
+        conn.execute("UPDATE capture_commands SET status='claimed',updated_at=? WHERE id=? AND status='queued'", (now, row["id"]))
+        return "CAPTURE " + row["id"]
+
+
 def send_line_alert(device: dict[str, Any], device_id: str, coverage: float, image_url: str,
                     water_level: int | None = None, flow_rate: float | None = None,
                     flow_status: str | None = None, alert_reason: str = "ขยะเกินเกณฑ์") -> tuple[bool, str]:
@@ -444,16 +504,18 @@ def list_devices() -> list[dict[str, Any]]:
 @app.post("/api/captures")
 async def create_capture(device_id: str = Form(...), captured_at: str = Form(...),
                          image: UploadFile = File(...), device_token: str = Form(""),
+                         command_id: str | None = Form(None),
                          water_level: int | None = Form(None), flow_rate: float | None = Form(None),
                          flow_status: str | None = Form(None)) -> dict[str, Any]:
     devices = devices_config()
     if device_id not in devices:
         raise HTTPException(404, "Unknown device")
-    expected_token = DEVICE_TOKENS.get(device_id)
-    if APP_ENV == "production" and not expected_token:
-        raise HTTPException(503, "Device token is not configured")
-    if expected_token and not secrets.compare_digest(device_token, expected_token):
-        raise HTTPException(401, "Invalid device token")
+    require_device_token(device_id, device_token)
+    if command_id:
+        with db() as conn:
+            command = conn.execute("SELECT status FROM capture_commands WHERE id=? AND device_id=?", (command_id, device_id)).fetchone()
+        if not command or command["status"] != "claimed":
+            raise HTTPException(409, "Capture command is missing, expired, or already completed")
     if water_level not in (None, 0, 1):
         raise HTTPException(422, "water_level must be 0, 1, or omitted")
     if flow_rate is not None and flow_rate < 0:
@@ -516,6 +578,13 @@ async def create_capture(device_id: str = Form(...), captured_at: str = Form(...
              str(original_path), str(annotated_path) if annotated_path.exists() else None,
              analysis["status"], analysis["coverage"], THRESHOLD, int(alert_sent), alert_status,
              json.dumps(analysis["detections"]), analysis["error"], water_level, flow_rate, flow_status))
+        if command_id:
+            result = {"id": capture_id, "device_id": device_id, "model_status": analysis["status"],
+                      "coverage": analysis["coverage"], "threshold": THRESHOLD,
+                      "detections": analysis["detections"], "alert_sent": alert_sent,
+                      "alert_status": alert_status, "error": analysis["error"]}
+            conn.execute("UPDATE capture_commands SET status='completed',capture_id=?,result_json=?,updated_at=? WHERE id=? AND status='claimed'",
+                         (capture_id, json.dumps(result), datetime.now(timezone.utc).isoformat(), command_id))
     await run_in_threadpool(prune_captures)
     return {"id": capture_id, "device_id": device_id, "model_status": analysis["status"],
             "coverage": analysis["coverage"], "threshold": THRESHOLD, "detections": analysis["detections"],

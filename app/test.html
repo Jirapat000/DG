@@ -28,10 +28,10 @@
 <main>
   <div class="eyebrow">Model playground</div>
   <h1 class="page-title">ทดสอบภาพขยะ</h1>
-  <p class="page-subtitle">ผลทดสอบไม่ถูกบันทึกและไม่ส่ง LINE</p>
+  <p class="page-subtitle">อัปโหลดภาพเพื่อทดสอบโมเดล หรือสั่งกล้อง ESP32-CAM ถ่ายภาพจริง</p>
   <div class="layout">
     <section class="panel" aria-labelledby="uploadTitle">
-      <div class="panel-head"><div><h2 class="panel-title" id="uploadTitle">เลือกรูปภาพ</h2><p class="panel-caption">JPEG, PNG, WebP · ไม่เกิน 8 MB</p></div></div>
+        <div class="panel-head"><div><h2 class="panel-title" id="uploadTitle">เลือกรูปภาพ</h2><p class="panel-caption">JPEG, PNG, WebP · ไม่เกิน 8 MB · ภาพอัปโหลดจะไม่บันทึกและไม่ส่ง LINE</p></div></div>
       <form class="upload-form" id="form">
         <label class="drop" id="drop" for="image">
           <span class="drop-content"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M20 16.5v2a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-2"/></svg><strong>เลือกรูปหรือลากมาวาง</strong><span>แนะนำภาพหน้าตะแกรงท่อ</span></span>
@@ -42,6 +42,13 @@
         <div class="feedback" id="feedback" role="alert" aria-live="polite"></div>
         <details class="limits"><summary>ข้อจำกัดโมเดล</summary><p>ใช้ภาพเต็มเป็น ROI และอาจประเมินพื้นที่จากกรอบตรวจจับ ค่าพื้นที่ไม่ใช่สัดส่วนการอุดตันที่ยืนยันภาคสนาม</p></details>
       </form>
+      <div style="margin:0 16px 16px;padding-top:15px;border-top:1px solid var(--line)">
+        <h2 class="panel-title">ถ่ายภาพจากกล้อง</h2>
+        <p class="panel-caption" style="margin:5px 0 12px">กล้องต้องเปิดและใช้เฟิร์มแวร์ทดสอบที่ polling คำสั่งเว็บอยู่</p>
+        <button class="button" id="cameraCapture" type="button">สั่ง ESP32-CAM ถ่ายและวิเคราะห์</button>
+        <div class="feedback" id="cameraFeedback" role="status" aria-live="polite"></div>
+        <p class="panel-caption" style="line-height:1.6;margin-top:9px">ภาพจะถูกบันทึกตามนโยบายเก็บข้อมูลปัจจุบัน และภาพที่เกินเกณฑ์อาจส่ง LINE OA แจ้งเตือน</p>
+      </div>
     </section>
 
     <section class="panel result-panel" aria-labelledby="resultTitle">
@@ -74,6 +81,40 @@ function setFile(file){
   $('#fileName').textContent=file.name;$('#fileSize').textContent=`${(file.size/1024/1024).toFixed(2)} MB`;$('#fileRow').classList.add('show');submit.disabled=false;
   $('#stageEmpty').querySelector('strong').textContent='พร้อมวิเคราะห์';$('#stageEmpty').querySelector('span').textContent='ตรวจชื่อไฟล์และกดวิเคราะห์ภาพ';$('#resultBadge').textContent='พร้อม';$('#resultFile').textContent=file.name;
 }
+const cameraButton=$('#cameraCapture'),cameraFeedback=$('#cameraFeedback');
+let cameraBusy=false;
+function cameraMessage(message,error=false){cameraFeedback.textContent=message;cameraFeedback.classList.add('show');cameraFeedback.style.color=error?'var(--danger)':'var(--muted)';cameraFeedback.style.background=error?'rgba(255,156,131,.09)':'rgba(180,241,107,.08)'}
+function showCameraResult(result){
+  const capture=result.result||{};const imageUrl=`/api/captures/${encodeURIComponent(result.capture_id)}/image?annotated=true&t=${Date.now()}`;
+  $('#annotated').src=imageUrl;$('#annotated').hidden=false;$('#stageEmpty').hidden=true;
+  $('#resultFile').textContent=`ภาพจาก ${result.device_id} · ${new Date(result.updated_at).toLocaleString('th-TH')}`;
+  $('#resultBadge').textContent=capture.model_status==='analyzed_bbox_estimate'?'พื้นที่ประมาณ':'วิเคราะห์แล้ว';$('#resultBadge').className=`result-badge ${capture.error?'warn':'good'}`;
+  $('#count').textContent=(capture.detections||[]).length;$('#coverage').textContent=capture.coverage===null||capture.coverage===undefined?'—':`≈ ${(capture.coverage*100).toFixed(1)}%`;
+  $('#dimensions').textContent='ภาพจากกล้อง';$('#stats').hidden=false;
+  $('#detectionList').innerHTML=capture.detections?.length?capture.detections.map((d,i)=>`<div class="det-row"><span>${i+1}. ${esc(d.class)}</span><span class="det-score">${(d.confidence*100).toFixed(1)}%</span></div>`).join(''):'<div class="det-row"><span>ไม่พบวัตถุขยะ</span><span class="det-score">—</span></div>';
+  $('#detections').hidden=false;
+  const alertText=capture.alert_sent?'ส่ง LINE OA แล้ว':capture.alert_status==='not_triggered'?'ไม่เข้าเกณฑ์แจ้งเตือน':`สถานะแจ้งเตือน: ${capture.alert_status||'ไม่ทราบ'}`;
+  $('#resultNote').textContent=`พื้นที่ ${capture.coverage===null||capture.coverage===undefined?'—':(capture.coverage*100).toFixed(1)+'%'} · เกณฑ์ ${(capture.threshold*100).toFixed(0)}% · ${alertText}${capture.error?' · '+capture.error:''}`;$('#resultNote').hidden=false;
+}
+cameraButton.addEventListener('click',async()=>{
+  if(cameraBusy)return;cameraBusy=true;cameraButton.disabled=true;cameraButton.classList.add('loading');cameraButton.innerHTML='<span class="spinner" aria-hidden="true"></span>กำลังรอกล้อง';cameraFeedback.classList.remove('show');$('#resultBadge').textContent='รอกล้องรับคำสั่ง';$('#stageLoading').classList.add('show');$('#stageLoading').querySelector('.loading-label').textContent='รอ ESP32-CAM ถ่ายและส่งภาพ';
+  let pollTimer;
+  try{
+    const form=new FormData();form.append('device_id','drain-01');
+    const created=await fetch('/api/capture-commands',{method:'POST',body:form});const command=await created.json().catch(()=>({detail:'เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง'}));if(!created.ok)throw new Error(command.detail||'สั่งถ่ายภาพไม่สำเร็จ');
+    cameraMessage(command.status==='claimed'?'กล้องกำลังประมวลผลคำสั่งก่อนหน้า…':'คำสั่งส่งแล้ว กำลังรอกล้อง…');
+    const deadline=Date.now()+6*60*1000;
+    while(Date.now()<deadline){
+      await new Promise(resolve=>pollTimer=setTimeout(resolve,2500));
+      const response=await fetch(`/api/capture-commands/${encodeURIComponent(command.id)}`,{cache:'no-store'});const state=await response.json().catch(()=>({detail:'อ่านสถานะคำสั่งไม่ได้'}));if(!response.ok)throw new Error(state.detail||'อ่านสถานะคำสั่งไม่ได้');
+      if(state.status==='completed'){showCameraResult(state);cameraMessage(state.result?.alert_sent?'รับภาพและวิเคราะห์แล้ว · ส่ง LINE OA แจ้งเตือนแล้ว':`รับภาพและวิเคราะห์แล้ว · ${state.result?.alert_status==='not_triggered'?'ไม่เข้าเกณฑ์ส่ง LINE':'ไม่มีการส่ง LINE'}`);return}
+      if(state.status==='expired'||state.status==='failed')throw new Error(`คำสั่งหมดอายุหรือผิดพลาด (${state.status})`);
+      cameraMessage(state.status==='claimed'?'กล้องรับคำสั่งแล้ว กำลังถ่ายและวิเคราะห์ภาพ…':'กำลังรอ ESP32-CAM ออนไลน์…');
+    }
+    throw new Error('หมดเวลารอกล้อง ตรวจ Wi-Fi/ไฟเลี้ยงและเปิดเฟิร์มแวร์ทดสอบไว้');
+  }catch(error){cameraMessage(error.message,true);$('#resultBadge').textContent='ทดสอบไม่สำเร็จ';$('#resultBadge').className='result-badge warn'}
+  finally{clearTimeout(pollTimer);cameraBusy=false;cameraButton.disabled=false;cameraButton.classList.remove('loading');cameraButton.textContent='สั่ง ESP32-CAM ถ่ายและวิเคราะห์';$('#stageLoading').classList.remove('show');$('#stageLoading').querySelector('.loading-label').textContent='กำลังวิเคราะห์ภาพ'}
+});
 input.addEventListener('change',()=>setFile(input.files[0]));
 for(const type of ['dragenter','dragover'])drop.addEventListener(type,e=>{e.preventDefault();drop.classList.add('drag')});
 for(const type of ['dragleave','drop'])drop.addEventListener(type,e=>{e.preventDefault();drop.classList.remove('drag')});
