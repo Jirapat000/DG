@@ -310,6 +310,8 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(FLOW_PIN), countFlowPulse, FALLING);
   if (!setupCamera()) { Serial.println("Camera unavailable; sensor telemetry continues"); }
   else cameraReady = true;
+  Serial.printf("CAMERA: %s | PSRAM=%s | FREE_HEAP=%u\n",
+                cameraReady ? "ready" : "failed", psramFound() ? "yes" : "no", ESP.getFreeHeap());
   if (connectWiFi()) resetSleepConfirmation();
   else Serial.println("Wi-Fi unavailable; staying awake and retrying; deep sleep remains blocked");
   lastGuardReset = millis();
