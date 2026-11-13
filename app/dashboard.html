@@ -27,7 +27,7 @@
     <span><span class="brand-name">DRAIN WATCH</span><span class="brand-caption">เฝ้าระวังขยะหน้าท่อ</span></span>
   </a>
   <div class="top-actions">
-    <div class="live" id="live" role="status" aria-live="polite"><span class="live-dot"></span><span>กำลังเชื่อมต่อ</span></div>
+    <div class="live error" id="live" role="status" aria-live="polite"><span class="live-dot"></span><span>รอการเชื่อมต่อ ESP32-CAM</span></div>
     <button class="icon-button" id="refreshButton" type="button" aria-label="อัปเดตข้อมูล" title="อัปเดตข้อมูล">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9A7 7 0 0 1 18 6.5L20 12M4 12l2 5.5A7 7 0 0 0 18.4 15"/></svg>
     </button>
@@ -78,10 +78,13 @@ function setState(node,text,tone=''){node.className=`sensor-state ${tone}`;node.
 function currentDevice(){const chosen=$('#deviceFilter').value;return liveStatus.find(x=>x.id===chosen)||liveStatus[0]||null}
 function renderDeviceStatus(){
   const item=currentDevice();const captureButton=$('#captureNow'),flashButton=$('#flashToggle');
-  if(!item){$('#deviceRuntime').textContent='ยังไม่มีข้อมูลสถานะจากอุปกรณ์';captureButton.disabled=true;flashButton.disabled=true;return}
-  const labels={online:'ออนไลน์',offline:'ออฟไลน์',sleeping:'deep sleep'};const modes={active:'ทำงานอยู่',deep_sleep:'พักระบบ รอลูกลอยปลุก',standby:'สแตนด์บาย',unknown:'รอสถานะ'};
+  if(!item){$('#deviceRuntime').textContent='รอการเชื่อมต่อจาก ESP32-CAM';setLive('รอการเชื่อมต่อ ESP32-CAM',true);captureButton.disabled=true;flashButton.disabled=true;return}
+  const labels={online:'เชื่อมต่อแล้ว',offline:'รอการเชื่อมต่อ',sleeping:'deep sleep'};const modes={active:'ทำงานอยู่',deep_sleep:'พักระบบ รอลูกลอยปลุก',standby:'สแตนด์บาย',unknown:'รอสถานะ'};
   const age=item.last_seen?`อัปเดตล่าสุด ${new Date(item.last_seen).toLocaleTimeString()}`:'ยังไม่เคยรายงาน';
   $('#deviceRuntime').textContent=`${item.name||item.id} · ${labels[item.connection]||item.connection} · ${modes[item.mode]||item.mode} · ${age}`;
+  if(item.connection==='online')setLive('ESP32-CAM เชื่อมต่อแล้ว');
+  else if(item.connection==='sleeping')setLive('ESP32-CAM อยู่ใน deep sleep');
+  else setLive('รอการเชื่อมต่อ ESP32-CAM',true);
   const water=item.water_level===null||item.water_level===undefined?null:item.water_level===1;
   $('#waterLevel').textContent=water===null?'ไม่มีข้อมูล':water?'น้ำขึ้น':'ไม่พบน้ำ';
   $('#waterTime').textContent=item.connection==='sleeping'?'ค่าล่าสุดก่อนเข้าสลีป':item.last_seen?`อ่านสด ${new Date(item.last_seen).toLocaleTimeString()}`:'รอข้อมูลจากบอร์ด';
@@ -147,7 +150,6 @@ async function refresh(){
       $('#waterLevel').textContent='ไม่มีข้อมูล';$('#waterTime').textContent='ยังไม่มีภาพจากอุปกรณ์';setState($('#waterState'),'รอข้อมูล');
       $('#flowRate').textContent='ไม่มีข้อมูล';setState($('#flowState'),'รอข้อมูล');
     }
-    setLive('เชื่อมต่อแล้ว');
     $('#modelState').textContent=health.model_loaded?'โมเดลพร้อมตรวจจับ':'ยังไม่ได้ตั้งค่าโมเดล';
     $('#updatedAt').textContent=`อัปเดต ${new Date().toLocaleTimeString()}`;
     renderEvents(captures,devices);
@@ -160,7 +162,7 @@ async function refresh(){
   }finally{button.disabled=false;button.classList.remove('is-busy')}
 }
 let statusBusy=false;
-async function refreshDeviceStatus(){if(statusBusy)return;statusBusy=true;try{const response=await fetch('/api/device-status',{cache:'no-store'});if(!response.ok)throw new Error();liveStatus=await response.json();renderDeviceStatus()}catch{if(!liveStatus.length)$('#deviceRuntime').textContent='โหลดสถานะอุปกรณ์ไม่ได้'}finally{statusBusy=false}}
+async function refreshDeviceStatus(){if(statusBusy)return;statusBusy=true;try{const response=await fetch('/api/device-status',{cache:'no-store'});if(!response.ok)throw new Error();liveStatus=await response.json();renderDeviceStatus()}catch{$('#deviceRuntime').textContent='ตรวจสอบสถานะ ESP32-CAM ไม่ได้';setLive('ตรวจสอบสถานะอุปกรณ์ไม่ได้',true)}finally{statusBusy=false}}
 $('#captureNow').addEventListener('click',async()=>{
   const device=currentDevice();if(!device)return;const button=$('#captureNow');button.disabled=true;$('#deviceMessage').classList.remove('error');$('#deviceMessage').textContent='ส่งคำสั่งถ่ายภาพไปยังกล้อง…';
   try{const form=new FormData();form.append('device_id',device.id);const response=await fetch('/api/capture-commands',{method:'POST',body:form});const data=await response.json();if(!response.ok)throw new Error(data.detail||'สั่งถ่ายภาพไม่สำเร็จ');$('#deviceMessage').textContent='รับคำสั่งแล้ว; รอกล้องถ่ายและส่งภาพขึ้นระบบ';let attempts=0;while(attempts++<90){await new Promise(resolve=>setTimeout(resolve,2000));const status=await fetch(`/api/capture-commands/${encodeURIComponent(data.id)}`,{cache:'no-store'});const result=await status.json();if(!status.ok)throw new Error(result.detail||'อ่านผลคำสั่งไม่ได้');if(result.status==='completed'){$('#deviceMessage').textContent=result.result?.alert_sent?'ตรวจภาพแล้วและส่ง LINE OA แล้ว':`ตรวจภาพแล้ว · ${result.result?.alert_status==='not_triggered'?'ไม่เข้าเกณฑ์แจ้งเตือน':result.result?.alert_status}`;await refresh();return}if(result.status==='expired'||result.status==='failed')throw new Error(`คำสั่ง ${result.status}`)}throw new Error('หมดเวลารอกล้อง ตรวจสถานะอุปกรณ์แล้วลองใหม่')}catch(error){$('#deviceMessage').textContent=error.message;$('#deviceMessage').classList.add('error')}finally{button.disabled=false;await refreshDeviceStatus()}
