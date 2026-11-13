@@ -463,7 +463,10 @@ def send_line_alert(device: dict[str, Any], device_id: str, coverage: float, ima
 
 def public_base_url() -> str:
     """Use an explicit URL, or Render's public service URL when available."""
-    return (os.getenv("PUBLIC_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    configured = os.getenv("PUBLIC_BASE_URL", "").strip()
+    render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip()
+    render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+    return (configured or render_url or (f"https://{render_host}" if render_host else "")).rstrip("/")
 
 
 def public_capture_image_token(capture_id: str) -> str | None:
