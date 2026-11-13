@@ -45,6 +45,9 @@
       <div style="margin:0 16px 16px;padding-top:15px;border-top:1px solid var(--line)">
         <h2 class="panel-title">ถ่ายภาพจากกล้อง</h2>
         <p class="panel-caption" style="margin:5px 0 12px">กล้องต้องเปิดและใช้เฟิร์มแวร์ทดสอบที่ polling คำสั่งเว็บอยู่</p>
+        <div id="deviceState" role="status" aria-live="polite" style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin:12px 0;padding:11px 12px;border-radius:11px;background:var(--surface-2);font-size:11px"><span>สถานะ ESP32-CAM</span><strong id="deviceConnection" style="color:var(--warning)">กำลังตรวจสอบ…</strong></div>
+        <p class="panel-caption" id="deviceLastSeen" style="margin:0 0 10px">ยังไม่มี heartbeat จากอุปกรณ์</p>
+        <button class="button" id="cameraFlash" type="button" style="margin-bottom:9px;background:var(--surface-3);color:var(--text)">กำลังอ่านสถานะแฟลช…</button>
         <button class="button" id="cameraCapture" type="button">สั่ง ESP32-CAM ถ่ายและวิเคราะห์</button>
         <div class="feedback" id="cameraFeedback" role="status" aria-live="polite"></div>
         <p class="panel-caption" style="line-height:1.6;margin-top:9px">ภาพจะถูกบันทึกตามนโยบายเก็บข้อมูลปัจจุบัน และภาพที่เกินเกณฑ์อาจส่ง LINE OA แจ้งเตือน</p>
@@ -83,6 +86,25 @@ function setFile(file){
 }
 const cameraButton=$('#cameraCapture'),cameraFeedback=$('#cameraFeedback');
 let cameraBusy=false;
+const flashButton=$('#cameraFlash'),connectionLabel=$('#deviceConnection');let deviceState=null,flashBusy=false;
+function renderDeviceState(){
+  if(!deviceState)return;
+  const labels={online:'เชื่อมต่อแล้ว',offline:'ยังไม่เชื่อมต่อ / รอการเชื่อมต่อ',sleeping:'สลีป'};
+  const online=deviceState.connection==='online';connectionLabel.textContent=labels[deviceState.connection]||'ยังไม่มีข้อมูล';connectionLabel.style.color=online?'var(--accent)':deviceState.connection==='sleeping'?'var(--warning)':'var(--warning)';
+  $('#deviceLastSeen').textContent=deviceState.last_seen?`รับสัญญาณล่าสุด ${new Date(deviceState.last_seen).toLocaleString('th-TH')} · แฟลช ${deviceState.flash_on?'เปิด':'ปิด'}${deviceState.flash_requested!==deviceState.flash_on?' · รอคำสั่งทำงาน':''}`:'ยังไม่มี heartbeat จากอุปกรณ์';
+  flashButton.textContent=deviceState.flash_requested?'ปิดแฟลช':'เปิดแฟลช';flashButton.disabled=flashBusy||!online;flashButton.style.opacity=online?'1':'.55';
+  cameraButton.disabled=cameraBusy||!online;
+}
+async function refreshDeviceState(){
+  try{const response=await fetch('/api/device-status',{cache:'no-store'});if(!response.ok)throw new Error();const items=await response.json();deviceState=items.find(item=>item.id==='drain-01')||null;if(!deviceState)throw new Error();renderDeviceState()}
+  catch{connectionLabel.textContent='อ่านสถานะไม่ได้';connectionLabel.style.color='var(--danger)';flashButton.disabled=true;cameraButton.disabled=true}
+}
+flashButton.addEventListener('click',async()=>{
+  if(!deviceState||deviceState.connection!=='online'||flashBusy)return;flashBusy=true;flashButton.disabled=true;
+  try{const form=new FormData();form.append('enabled',deviceState.flash_requested?'false':'true');const response=await fetch('/api/devices/drain-01/flash',{method:'POST',body:form});const result=await response.json().catch(()=>({detail:'เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง'}));if(!response.ok)throw new Error(result.detail||'ส่งคำสั่งแฟลชไม่สำเร็จ');cameraMessage(result.requested?'ส่งคำสั่งเปิดแฟลชแล้ว':'ส่งคำสั่งปิดแฟลชแล้ว');await refreshDeviceState()}
+  catch(error){cameraMessage(error.message,true)}finally{flashBusy=false;renderDeviceState()}
+});
+refreshDeviceState();setInterval(refreshDeviceState,5000);
 function cameraMessage(message,error=false){cameraFeedback.textContent=message;cameraFeedback.classList.add('show');cameraFeedback.style.color=error?'var(--danger)':'var(--muted)';cameraFeedback.style.background=error?'rgba(255,156,131,.09)':'rgba(180,241,107,.08)'}
 function showCameraResult(result){
   const capture=result.result||{};const imageUrl=`/api/captures/${encodeURIComponent(result.capture_id)}/image?annotated=true&t=${Date.now()}`;
@@ -97,7 +119,7 @@ function showCameraResult(result){
   $('#resultNote').textContent=`พื้นที่ ${capture.coverage===null||capture.coverage===undefined?'—':(capture.coverage*100).toFixed(1)+'%'} · เกณฑ์ ${(capture.threshold*100).toFixed(0)}% · ${alertText}${capture.error?' · '+capture.error:''}`;$('#resultNote').hidden=false;
 }
 cameraButton.addEventListener('click',async()=>{
-  if(cameraBusy)return;cameraBusy=true;cameraButton.disabled=true;cameraButton.classList.add('loading');cameraButton.innerHTML='<span class="spinner" aria-hidden="true"></span>กำลังรอกล้อง';cameraFeedback.classList.remove('show');$('#resultBadge').textContent='รอกล้องรับคำสั่ง';$('#stageLoading').classList.add('show');$('#stageLoading').querySelector('.loading-label').textContent='รอ ESP32-CAM ถ่ายและส่งภาพ';
+  if(cameraBusy||!deviceState||deviceState.connection!=='online')return;cameraBusy=true;cameraButton.disabled=true;cameraButton.classList.add('loading');cameraButton.innerHTML='<span class="spinner" aria-hidden="true"></span>กำลังรอกล้อง';cameraFeedback.classList.remove('show');$('#resultBadge').textContent='รอกล้องรับคำสั่ง';$('#stageLoading').classList.add('show');$('#stageLoading').querySelector('.loading-label').textContent='รอ ESP32-CAM ถ่ายและส่งภาพ';
   let pollTimer;
   try{
     const form=new FormData();form.append('device_id','drain-01');
@@ -113,7 +135,7 @@ cameraButton.addEventListener('click',async()=>{
     }
     throw new Error('หมดเวลารอกล้อง ตรวจ Wi-Fi/ไฟเลี้ยงและเปิดเฟิร์มแวร์ทดสอบไว้');
   }catch(error){cameraMessage(error.message,true);$('#resultBadge').textContent='ทดสอบไม่สำเร็จ';$('#resultBadge').className='result-badge warn'}
-  finally{clearTimeout(pollTimer);cameraBusy=false;cameraButton.disabled=false;cameraButton.classList.remove('loading');cameraButton.textContent='สั่ง ESP32-CAM ถ่ายและวิเคราะห์';$('#stageLoading').classList.remove('show');$('#stageLoading').querySelector('.loading-label').textContent='กำลังวิเคราะห์ภาพ'}
+  finally{clearTimeout(pollTimer);cameraBusy=false;cameraButton.classList.remove('loading');cameraButton.textContent='สั่ง ESP32-CAM ถ่ายและวิเคราะห์';$('#stageLoading').classList.remove('show');$('#stageLoading').querySelector('.loading-label').textContent='กำลังวิเคราะห์ภาพ';renderDeviceState()}
 });
 input.addEventListener('change',()=>setFile(input.files[0]));
 for(const type of ['dragenter','dragover'])drop.addEventListener(type,e=>{e.preventDefault();drop.classList.add('drag')});

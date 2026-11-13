@@ -399,6 +399,23 @@ def poll_capture_command(device_id: str, x_device_token: str = Header(default=""
         return "CAPTURE " + row["id"]
 
 
+@app.get("/api/devices/{device_id}/test-control", response_class=PlainTextResponse)
+def poll_test_control(device_id: str, x_device_token: str = Header(default="")) -> str:
+    """Combined low-traffic control poll for the battery-powered test sketch."""
+    require_device_token(device_id, x_device_token)
+    now = datetime.now(timezone.utc).isoformat()
+    with db() as conn:
+        state = conn.execute("SELECT flash_requested FROM device_status WHERE device_id=?", (device_id,)).fetchone()
+        conn.execute("UPDATE capture_commands SET status='expired',updated_at=? WHERE device_id=? AND status='queued' AND created_at < ?",
+                     (now, device_id, (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()))
+        row = conn.execute("SELECT id FROM capture_commands WHERE device_id=? AND status='queued' ORDER BY created_at LIMIT 1", (device_id,)).fetchone()
+        capture_id = row["id"] if row else "NONE"
+        if row:
+            conn.execute("UPDATE capture_commands SET status='claimed',updated_at=? WHERE id=? AND status='queued'", (now, row["id"]))
+        flash = "ON" if state and state["flash_requested"] else "OFF"
+    return f"FLASH={flash};CAPTURE={capture_id}"
+
+
 def send_line_alert(device: dict[str, Any], device_id: str, coverage: float, image_url: str,
                     water_level: int | None = None, flow_rate: float | None = None,
                     flow_status: str | None = None, alert_reason: str = "ขยะเกินเกณฑ์") -> tuple[bool, str]:
@@ -711,11 +728,11 @@ async def create_telemetry(device_id: str = Form(...), captured_at: str = Form(.
     if reasons and alert_status != "cooldown":
         mark_alert_sent(device_id)
     with db() as conn:
-        conn.execute("""INSERT INTO device_status(device_id,last_seen,device_mode,water_level,flow_rate,flow_status,flash_on)
-            VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET last_seen=excluded.last_seen,
+        conn.execute("""INSERT INTO device_status(device_id,last_seen,device_mode,water_level,flow_rate,flow_status,flash_on,flash_requested)
+            VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET last_seen=excluded.last_seen,
             device_mode=excluded.device_mode,water_level=excluded.water_level,flow_rate=excluded.flow_rate,
             flow_status=excluded.flow_status,flash_on=excluded.flash_on""",
-            (device_id, received_at, device_mode, water_level, flow_rate, flow_status, int(flash_on)))
+            (device_id, received_at, device_mode, water_level, flow_rate, flow_status, int(flash_on), int(flash_on)))
         if reasons and alert_sent:
             conn.execute("""INSERT INTO captures(id,device_id,captured_at,received_at,image_path,annotated_path,
                 model_status,coverage,alert_threshold,alert_sent,alert_status,detections_json,error,

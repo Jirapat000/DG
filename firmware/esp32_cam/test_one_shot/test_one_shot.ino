@@ -10,6 +10,7 @@
 static const uint32_t WIFI_TIMEOUT_MS = 30000;
 static const uint32_t API_TIMEOUT_MS = 45000;
 static const uint32_t COMMAND_POLL_MS = 5000;
+static const uint32_t HEARTBEAT_INTERVAL_MS = 15000;
 
 // AI Thinker ESP32-CAM pin map.
 static const int PWDN_GPIO_NUM = 32, RESET_GPIO_NUM = -1;
@@ -19,7 +20,14 @@ static const int Y9_GPIO_NUM = 35, Y8_GPIO_NUM = 34, Y7_GPIO_NUM = 39, Y6_GPIO_N
 static const int Y5_GPIO_NUM = 21, Y4_GPIO_NUM = 19, Y3_GPIO_NUM = 18, Y2_GPIO_NUM = 5;
 static const int VSYNC_GPIO_NUM = 25, HREF_GPIO_NUM = 23, PCLK_GPIO_NUM = 22;
 static bool cameraReady = false;
-static uint32_t lastCommandPoll = 0;
+static bool flashOn = false;
+static uint32_t lastCommandPoll = 0, lastHeartbeat = 0;
+
+void setFlash(bool enabled) {
+  flashOn = enabled;
+  digitalWrite(FLASH_LED_GPIO_NUM, flashOn ? HIGH : LOW);
+  Serial.printf("FLASH: %s\n", flashOn ? "ON" : "OFF");
+}
 
 bool setupCamera() {
   camera_config_t config = {};
@@ -72,6 +80,38 @@ bool syncClock() {
     return false;
   }
   return true;
+}
+
+void sendTestHeartbeat() {
+  if (!connectWiFi()) return;
+  struct tm timeInfo;
+  if (!getLocalTime(&timeInfo, 1500)) {
+    if (!syncClock() || !getLocalTime(&timeInfo, 1500)) {
+      Serial.println("Heartbeat skipped: NTP time unavailable");
+      return;
+    }
+  }
+  char timestamp[25];
+  strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeInfo);
+  const String boundary = "----DGTestHeartbeatBoundary71f2";
+  String body;
+  body.reserve(480);
+  body += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"device_id\"\r\n\r\n" + String(DEVICE_ID) + "\r\n";
+  body += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"captured_at\"\r\n\r\n" + String(timestamp) + "\r\n";
+  body += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"device_token\"\r\n\r\n" + String(DEVICE_TOKEN) + "\r\n";
+  body += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"device_mode\"\r\n\r\nactive\r\n";
+  body += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"flash_on\"\r\n\r\n" + String(flashOn ? "true" : "false") + "\r\n";
+  body += "--" + boundary + "--\r\n";
+
+  WiFiClientSecure secure;
+  secure.setCACert(ROOT_CA);
+  HTTPClient http;
+  if (!http.begin(secure, String("https://") + API_HOST + "/api/telemetry")) return;
+  http.setConnectTimeout(10000); http.setTimeout(10000);
+  http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+  const int code = http.POST((uint8_t *)body.c_str(), body.length());
+  Serial.printf("TEST HEARTBEAT: HTTP %d\n", code);
+  http.end();
 }
 
 bool captureAndUploadOnce(const String &commandId = "") {
@@ -163,13 +203,13 @@ bool captureAndUploadOnce(const String &commandId = "") {
   return ok;
 }
 
-void pollWebCaptureCommand() {
+void pollWebControl() {
   if (WiFi.status() != WL_CONNECTED || !cameraReady) return;
   WiFiClientSecure secureClient;
   secureClient.setCACert(ROOT_CA);
   secureClient.setTimeout(10);
   HTTPClient http;
-  const String url = String("https://") + API_HOST + "/api/devices/" + DEVICE_ID + "/capture-command";
+  const String url = String("https://") + API_HOST + "/api/devices/" + DEVICE_ID + "/test-control";
   if (!http.begin(secureClient, url)) {
     Serial.println("Web command poll: HTTPS setup failed");
     return;
@@ -187,15 +227,22 @@ void pollWebCaptureCommand() {
     Serial.printf("Web command poll returned HTTP %d\n", code);
     return;
   }
-  if (!body.startsWith("CAPTURE ")) return;
-  String commandId = body.substring(8);
-  commandId.trim();
-  if (commandId.length() < 10) {
-    Serial.println("Web command response had an invalid ID");
-    return;
+  const int flashAt = body.indexOf("FLASH=");
+  if (flashAt >= 0) {
+    const int flashEnd = body.indexOf(';', flashAt);
+    const String desired = body.substring(flashAt + 6, flashEnd < 0 ? body.length() : flashEnd);
+    if (desired == "ON" && !flashOn) setFlash(true);
+    else if (desired == "OFF" && flashOn) setFlash(false);
   }
-  Serial.printf("WEB COMMAND: capture requested (%s)\n", commandId.c_str());
-  captureAndUploadOnce(commandId);
+  const int captureAt = body.indexOf("CAPTURE=");
+  if (captureAt >= 0) {
+    String commandId = body.substring(captureAt + 8);
+    commandId.trim();
+    if (commandId != "NONE" && commandId.length() >= 10) {
+      Serial.println("WEB COMMAND: capture requested");
+      captureAndUploadOnce(commandId);
+    }
+  }
 }
 
 void setup() {
@@ -203,14 +250,19 @@ void setup() {
   delay(700);
   Serial.println("\n=== DrainGuard ESP32-CAM one-shot test ===");
   Serial.println("No sensors. No periodic capture. No automatic retries.");
-  Serial.println("Web control is enabled: keep this board on; the test page can command a capture.");
+  Serial.println("Battery test: Wi-Fi stays online; web page can toggle flash and request a capture.");
   Serial.println("Type c + Enter for a local one-shot capture; type i for status.");
   pinMode(FLASH_LED_GPIO_NUM, OUTPUT);
-  digitalWrite(FLASH_LED_GPIO_NUM, HIGH);
-  Serial.println("FLASH: on while the board is powered");
+  setFlash(false);
   cameraReady = setupCamera();
   Serial.printf("CAMERA: %s; PSRAM: %s\n", cameraReady ? "ready" : "failed", psramFound() ? "yes" : "no");
-  connectWiFi();
+  if (connectWiFi()) {
+    syncClock();
+    pollWebControl();
+    lastHeartbeat = millis() - HEARTBEAT_INTERVAL_MS;
+    sendTestHeartbeat();
+    lastHeartbeat = millis();
+  }
 }
 
 void loop() {
@@ -224,9 +276,14 @@ void loop() {
                     WiFi.RSSI(), WiFi.localIP().toString().c_str(), ESP.getFreeHeap(), ESP.getFreePsram());
     } else if (command != '\r' && command != '\n') Serial.println("Commands: c=capture/upload once, i=status");
   }
+  if (WiFi.status() != WL_CONNECTED) connectWiFi();
   if (millis() - lastCommandPoll >= COMMAND_POLL_MS) {
     lastCommandPoll = millis();
-    pollWebCaptureCommand();
+    pollWebControl();
+  }
+  if (millis() - lastHeartbeat >= HEARTBEAT_INTERVAL_MS) {
+    lastHeartbeat = millis();
+    sendTestHeartbeat();
   }
   delay(20);
 }
