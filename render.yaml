@@ -13,6 +13,8 @@ services:
         value: /tmp/drain-watch-data
       - key: DEVICE_CONFIG
         value: /app/config/devices.json
+      - key: PUBLIC_BASE_URL
+        value: https://drain-watch-api.onrender.com
       - key: MODEL_PATH
         value: /app/models/drain_trash.pt
       - key: MAX_STORED_CAPTURES
