@@ -36,7 +36,7 @@ If `DEVICE_TOKENS_JSON` is configured, uploads require the matching device token
 
 ## Storage and retention
 
-Images are saved under `data/images/`; metadata is stored in `data/drain_watch.sqlite3`. Retention cleanup runs at startup, hourly, and after each camera capture. Defaults keep up to 100 captures, up to 7 days old, within a 100 MB combined original/annotated image budget; older/excess rows and their image files are deleted. Configure `MAX_STORED_CAPTURES`, `CAPTURE_RETENTION_DAYS`, and `MAX_CAPTURE_STORAGE_MB` for your host. Render Free storage is temporary and can be lost on restart/redeploy.
+Images are saved under `data/images/`; metadata is stored in `data/drain_watch.sqlite3`. Retention cleanup runs at startup, hourly, and after each camera capture. Defaults keep up to 100 captures, up to 1 day old, within a 100 MB combined original/annotated image budget; older/excess rows and their image files are deleted. Configure `MAX_STORED_CAPTURES`, `CAPTURE_RETENTION_DAYS`, and `MAX_CAPTURE_STORAGE_MB` for your host. Render Free storage is temporary and can be lost on restart/redeploy.
 
 ## Docker
 

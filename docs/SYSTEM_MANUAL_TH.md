@@ -182,7 +182,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 | `ALERT_COOLDOWN_MINUTES` | `15` | หน่วง alert ซ้ำต่อ device หลังส่งสำเร็จ |
 | `MAX_IMAGE_MB` | `8` | ขนาดภาพสูงสุดที่รับ |
 | `MAX_STORED_CAPTURES` | `100` | จำนวนเหตุการณ์สูงสุดที่เก็บ; เกินแล้วลบรายการเก่าที่สุด |
-| `CAPTURE_RETENTION_DAYS` | `7` | อายุข้อมูลสูงสุดเป็นวัน; ลบเมื่อเกินกำหนด |
+| `CAPTURE_RETENTION_DAYS` | `1` | อายุข้อมูลสูงสุดเป็นวัน; ลบเมื่อเกินกำหนด |
 | `MAX_CAPTURE_STORAGE_MB` | `100` | พื้นที่สูงสุดรวมไฟล์ภาพต้นฉบับและภาพ annotated; เกินแล้วลบรายการเก่าที่สุด |
 | `DEVICE_TOKENS_JSON` | `{}` | optional device ID -> token; ไม่ตั้งหมายถึงไม่ตรวจ token |
 | `LINE_CHANNEL_ACCESS_TOKEN` | ว่าง | secret token ของ LINE Messaging API; ห้ามใส่ใน Git |
@@ -317,7 +317,7 @@ docker compose up --build
 - `/api/captures` ไม่มี token protection จนกว่าจะตั้ง `DEVICE_TOKENS_JSON`; rotate token หาก firmware/device สูญหาย และใช้ HTTPS ทุกครั้งบน internet
 - อย่าเก็บ channel token, Wi-Fi password, recipient IDs, device token ใน repo/ภาพหน้าจอ/URL; เพิ่ม secrets ผ่าน environment ของโฮสต์
 - ไฟล์ภาพอาจมีข้อมูลสถานที่/เวลา; กำหนด retention, consent, backup encryption และ deletion process ตามนโยบายหน่วยงานก่อน production
-- ระบบลบ capture เก่าตอนเริ่ม backend, ทุกชั่วโมง และหลังรับภาพใหม่ โดยคุมจำนวน อายุ และขนาดไฟล์ภาพตาม `MAX_STORED_CAPTURES`, `CAPTURE_RETENTION_DAYS`, `MAX_CAPTURE_STORAGE_MB`; ค่าเริ่มต้น 100 รายการ, 7 วัน, 100 MB การลบแถวใน SQLite คืนพื้นที่หน้า database ให้ใช้ซ้ำ แต่ขนาดไฟล์ SQLite บนดิสก์อาจไม่ย่อลงทันที
+- ระบบลบ capture เก่าตอนเริ่ม backend, ทุกชั่วโมง และหลังรับภาพใหม่ โดยคุมจำนวน อายุ และขนาดไฟล์ภาพตาม `MAX_STORED_CAPTURES`, `CAPTURE_RETENTION_DAYS`, `MAX_CAPTURE_STORAGE_MB`; ค่าเริ่มต้น 100 รายการ, 1 วัน, 100 MB การลบแถวใน SQLite คืนพื้นที่หน้า database ให้ใช้ซ้ำ แต่ขนาดไฟล์ SQLite บนดิสก์อาจไม่ย่อลงทันที
 - Render Free ใช้ filesystem ชั่วคราวและไม่มี persistent disk; ข้อมูลที่ยังอยู่ในช่วง retention ก็อาจหายเมื่อ service restart/redeploy จึงไม่ใช้แทน backup
 - ความล้มเหลว inference ถูกเก็บ error class ใน capture; เพิ่ม structured logging/monitoring และ alarm เมื่อ camera stale หรือ disk/DB เต็ม
 - สถานะ online ปัจจุบันอิงการรับภาพ ไม่ใช่ heartbeat แยก; production ควรบันทึก `last_seen`, uptime, firmware version, RSSI, camera health และ capture latency
