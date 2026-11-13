@@ -289,7 +289,10 @@ void enterDeepSleep() {
   }
   Serial.println("No float water and no flow for 10 minutes; reporting deep sleep.");
   applyFlash(false);
-  uploadTelemetry("deep_sleep");
+  if (!uploadTelemetry("deep_sleep")) {
+    Serial.println("Sleep aborted: backend did not confirm deep-sleep status; retrying while awake.");
+    return;
+  }
   if (cameraReady) { esp_camera_deinit(); cameraReady = false; }
   WiFi.disconnect(true); WiFi.mode(WIFI_OFF);
   rtc_gpio_init(GPIO_NUM_14);
