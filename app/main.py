@@ -8,6 +8,7 @@ import tempfile
 import uuid
 import base64
 import secrets
+import hmac
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -342,6 +343,12 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Drain Watch API", version="0.1.0", lifespan=lifespan)
 
 
+@app.get("/assets/drain-guard-logo.webp", include_in_schema=False)
+def drain_guard_brand_asset() -> FileResponse:
+    return FileResponse(ROOT / "app" / "assets" / "drain-guard-logo.webp",
+                        media_type="image/webp", headers={"Cache-Control": "public, max-age=604800"})
+
+
 def require_device_token(device_id: str, token: str) -> None:
     expected = DEVICE_TOKENS.get(device_id)
     if APP_ENV == "production" and not expected:
@@ -448,7 +455,24 @@ def send_line_alert(device: dict[str, Any], device_id: str, coverage: float, ima
         response.raise_for_status()
         return True, "sent"
     except requests.RequestException as exc:
-        return False, f"send_failed: {exc.__class__.__name__}"
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+        logger.warning("LINE delivery failed (%s)", f"HTTP {status}" if status else exc.__class__.__name__)
+        return False, f"send_failed{':HTTP_' + str(status) if status else ''}"
+
+
+def public_capture_image_token(capture_id: str) -> str | None:
+    key = (os.getenv("PUBLIC_IMAGE_SIGNING_KEY") or os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")).strip()
+    if not key:
+        return None
+    return hmac.new(key.encode("utf-8"), f"capture-image:{capture_id}".encode("utf-8"), "sha256").hexdigest()
+
+
+def public_capture_image_path(capture_id: str) -> str:
+    token = public_capture_image_token(capture_id)
+    if not token:
+        return ""
+    return f"/public/captures/{capture_id}/image?token={token}"
 
 
 def alert_reasons(coverage: float | None, water_level: int | None,
@@ -505,6 +529,7 @@ def health() -> dict[str, Any]:
                           "max_age_days": CAPTURE_RETENTION_DAYS,
                           "max_image_storage_mb": MAX_CAPTURE_STORAGE_BYTES // (1024 * 1024)},
             "line_configured": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
+            "line_image_configured": bool(os.getenv("PUBLIC_BASE_URL", "").strip() and public_capture_image_token("health-check")),
             "line_delivery": "broadcast_to_oa_friends"}
 
 
@@ -698,20 +723,8 @@ async def create_capture(device_id: str = Form(...), captured_at: str = Form(...
     if analysis["annotated"] is not None:
         Image.fromarray(analysis["annotated"]).save(annotated_path, "JPEG", quality=88)
 
-    reasons = alert_reasons(analysis["coverage"], water_level, flow_status)
-    alert_sent, alert_status = False, "not_triggered"
-    if reasons:
-        if alert_cooldown_ok(device_id):
-            alert_sent, alert_status = await run_in_threadpool(
-                send_line_alert, devices[device_id], device_id, analysis["coverage"],
-                f"/api/captures/{capture_id}/image?annotated=true", water_level,
-                flow_rate, flow_status, " / ".join(reasons))
-        else:
-            alert_status = "cooldown"
-
-    if reasons and alert_status != "cooldown":
-        mark_alert_sent(device_id)
-
+    # Persist the image before asking LINE to fetch its signed URL. LINE may
+    # request the image as soon as the broadcast is accepted.
     received_at = datetime.now(timezone.utc).isoformat()
     with db() as conn:
         conn.execute("""INSERT INTO captures(id,device_id,captured_at,received_at,image_path,annotated_path,
@@ -720,8 +733,26 @@ async def create_capture(device_id: str = Form(...), captured_at: str = Form(...
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (capture_id, device_id, timestamp.astimezone(timezone.utc).isoformat(), received_at,
              str(original_path), str(annotated_path) if annotated_path.exists() else None,
-             analysis["status"], analysis["coverage"], THRESHOLD, int(alert_sent), alert_status,
+             analysis["status"], analysis["coverage"], THRESHOLD, 0, "pending",
              json.dumps(analysis["detections"]), analysis["error"], water_level, flow_rate, flow_status))
+
+    reasons = alert_reasons(analysis["coverage"], water_level, flow_status)
+    alert_sent, alert_status = False, "not_triggered"
+    if reasons:
+        if alert_cooldown_ok(device_id):
+            alert_sent, alert_status = await run_in_threadpool(
+                send_line_alert, devices[device_id], device_id, analysis["coverage"],
+                public_capture_image_path(capture_id), water_level,
+                flow_rate, flow_status, " / ".join(reasons))
+        else:
+            alert_status = "cooldown"
+
+    if alert_sent:
+        mark_alert_sent(device_id)
+
+    with db() as conn:
+        conn.execute("UPDATE captures SET alert_sent=?,alert_status=? WHERE id=?",
+                     (int(alert_sent), alert_status, capture_id))
         if command_id:
             result = {"id": capture_id, "device_id": device_id, "model_status": analysis["status"],
                       "coverage": analysis["coverage"], "threshold": THRESHOLD,
@@ -773,7 +804,7 @@ async def create_telemetry(device_id: str = Form(...), captured_at: str = Form(.
                 flow_rate, flow_status, " / ".join(reasons))
         else:
             alert_status = "cooldown"
-    if reasons and alert_status != "cooldown":
+    if alert_sent:
         mark_alert_sent(device_id)
     with db() as conn:
         conn.execute("""INSERT INTO device_status(device_id,last_seen,device_mode,water_level,flow_rate,flow_status,flash_on,flash_requested,camera_ready)
@@ -817,3 +848,19 @@ def capture_image(capture_id: str, annotated: bool = False) -> FileResponse:
     if not candidate.is_file():
         raise HTTPException(404, "Image not found")
     return FileResponse(candidate, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.get("/public/captures/{capture_id}/image", include_in_schema=False)
+def public_line_capture_image(capture_id: str, token: str = Query(default="")) -> FileResponse:
+    """Serve LINE images with a per-capture HMAC URL, without admin Basic Auth."""
+    expected = public_capture_image_token(capture_id)
+    if not expected or not hmac.compare_digest(token, expected):
+        raise HTTPException(404, "Image not found")
+    with db() as conn:
+        row = conn.execute("SELECT image_path,annotated_path FROM captures WHERE id=?", (capture_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Image not found")
+    candidate = Path(row["annotated_path"]) if row["annotated_path"] else Path(row["image_path"])
+    if not candidate.is_file() or candidate.resolve().parent != IMAGE_DIR.resolve():
+        raise HTTPException(404, "Image not found")
+    return FileResponse(candidate, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})

@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0b1718">
-  <title>Drain Watch</title>
+  <meta name="theme-color" content="#f3f8ff">
+  <title>DrainGuard · เฝ้าระวังขยะหน้าท่อ</title>
   <style>
     :root{color-scheme:dark;--bg:#0b1718;--surface:#102021;--surface-2:#142728;--surface-3:#1a3030;--text:#e7efec;--muted:#91aaa6;--quiet:#6f8884;--accent:#b4f16b;--accent-ink:#142019;--warning:#ffc27e;--danger:#ff9c83;--line:rgba(145,170,166,.12);--radius:20px;--shadow:0 18px 55px rgba(0,0,0,.16);font-family:Inter,"Noto Sans Thai",system-ui,sans-serif;background:var(--bg);color:var(--text);font-synthesis:none}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse 70% 42% at 72% -12%,rgba(35,93,77,.28),transparent 70%),var(--bg)}button,select{font:inherit}button,a,select{-webkit-tap-highlight-color:transparent}a{color:inherit;text-decoration:none}button:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
@@ -18,13 +18,19 @@
     @keyframes spin{to{transform:rotate(360deg)}}@keyframes shimmer{to{background-position:-200% 0}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
     @media(max-width:780px){main{padding-top:32px}.page-head{align-items:flex-start;flex-direction:column;margin-bottom:24px}.head-meta{width:100%;justify-content:space-between}.kpi{min-height:112px;padding:16px}.kpi-value{font-size:27px}.events{grid-template-columns:1fr}}
     @media(max-width:540px){.topbar{height:66px;padding:0 17px}.brand-caption{display:none}.brand-mark{width:35px;height:35px}.live{font-size:10px;padding:7px 9px}.updated{display:none}main{padding:27px 16px 48px}.page-title{font-size:29px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.kpi{min-height:105px;padding:15px;border-radius:17px}.kpi:last-child{grid-column:1/-1;min-height:92px}.sensor-row{grid-template-columns:1fr;gap:9px;margin-bottom:28px}.sensor{padding:15px 16px;border-radius:17px}.device-control{grid-template-columns:1fr;margin-top:-12px;padding:16px}.device-actions{width:100%}.control-button{flex:1}.section-head{align-items:flex-start;flex-direction:column}.section-tools{width:100%;justify-content:space-between}.select{max-width:none;flex:1}.icon-button{width:37px;height:37px}.event{border-radius:17px}}
+    :root{color-scheme:light;--bg:#f3f8ff;--surface:#fff;--surface-2:#edf5ff;--surface-3:#e1efff;--text:#122d53;--muted:#58718f;--quiet:#8498b0;--accent:#078bd8;--accent-ink:#fff;--warning:#a85d00;--danger:#b83947;--line:rgba(18,67,123,.09);--shadow:0 10px 28px rgba(23,76,137,.075)}
+    body{background:radial-gradient(ellipse 66% 38% at 75% -12%,rgba(36,177,238,.15),transparent 72%),linear-gradient(180deg,#f7fbff 0%,var(--bg) 60%)}
+    .topbar{background:rgba(250,253,255,.88);border-bottom-color:rgba(26,91,158,.08)}.brand-logo{width:44px;height:44px;border-radius:50%;object-fit:cover;box-shadow:0 4px 12px rgba(0,108,198,.15);background:#fff}.brand-name{letter-spacing:.045em}.eyebrow{color:#087fce}
+    .live{color:#087f63;background:#e7f8f2}.live-dot,.status-dot{background:#0aa77c;box-shadow:0 0 10px rgba(10,167,124,.24)}.live.error{color:#9b5a00;background:#fff3db}.live.error .live-dot{background:#d38b18}.icon-button:hover{background:#dfedff}
+    .primary-link,.control-button.primary{background:linear-gradient(135deg,#078bd8,#15b9e8);color:#fff}.kpi.accent .kpi-value{color:#087fce}.sensor-state{background:#f1f5fb;color:#58718f}.sensor-state.good{background:#e7f8f2;color:#087f63}.sensor-state.good .status-dot{background:#0aa77c}.sensor-state.warn{background:#fff3db;color:#9b5a00}
+    .event{box-shadow:0 10px 30px rgba(23,76,137,.07);transition:transform .18s,box-shadow .18s}.event::before{background:radial-gradient(420px circle at var(--spot-x,50%) var(--spot-y,0%),rgba(13,156,222,.12),transparent 62%)}.event:hover{transform:translateY(-2px);background:#fff;box-shadow:0 16px 38px rgba(23,76,137,.12)}.photo-wrap{background:#e6f3ff}.photo-fallback{background:radial-gradient(ellipse at center,rgba(38,166,221,.12),transparent 65%),#e6f3ff;color:#78a9cc}.badge{color:#58718f}.badge.alert{color:#a85d00}.badge.ok{color:#087f63}.alert-status.sent{color:#087f63}.skeleton-card{background:#fff}.skeleton-line{background:linear-gradient(90deg,#e8f1fa 20%,#f5f9fd 45%,#e8f1fa 70%);background-size:200% 100%}.empty svg{color:#78a9cc}button:focus-visible,a:focus-visible,select:focus-visible{outline-color:#078bd8}
   </style>
 </head>
 <body>
 <header class="topbar">
   <a class="brand" href="/" aria-label="Drain Watch ภาพรวม">
-    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16M7 5v14m5-14v14m5-14v14"/></svg></span>
-    <span><span class="brand-name">DRAIN WATCH</span><span class="brand-caption">เฝ้าระวังขยะหน้าท่อ</span></span>
+    <img class="brand-logo" src="/assets/drain-guard-logo.webp" alt="">
+    <span><span class="brand-name">DRAINGUARD</span><span class="brand-caption">เฝ้าระวังขยะหน้าท่อ</span></span>
   </a>
   <div class="top-actions">
     <div class="live error" id="live" role="status" aria-live="polite"><span class="live-dot"></span><span>รอการเชื่อมต่อ ESP32-CAM</span></div>
@@ -117,7 +123,7 @@ function renderEvents(captures,devices){
     const label=over?'ขยะเกินเกณฑ์':x.model_status==='analyzed'||approximate?'วิเคราะห์แล้ว':'ยังไม่มีผล';
     const badge=over?'alert':x.coverage!==null?'ok':'neutral';
     const sent=x.alert_status==='sent';
-    const alertLabel=sent?'LINE ส่งแล้ว':x.alert_status==='cooldown'?'อยู่ในช่วงพัก':x.alert_status==='not_configured'?'ยังไม่ตั้งค่า LINE':x.alert_status==='send_failed'?'ส่ง LINE ไม่สำเร็จ':x.alert_status;
+    const alertLabel=sent?'LINE ส่งแล้ว':x.alert_status==='cooldown'?'อยู่ในช่วงพัก':x.alert_status==='not_configured'?'ยังไม่ตั้งค่า LINE':x.alert_status?.startsWith('send_failed')?`ส่ง LINE ไม่สำเร็จ${x.alert_status.includes(':')?' · '+x.alert_status.split(':')[1]:''}`:x.alert_status;
     const detections=x.detections?.length?x.detections.map(d=>d.class).join(', '):'ไม่พบขยะ';
     const image=`/api/captures/${encodeURIComponent(x.id)}/image`;
     if(x.model_status==='sensor_event')return `<article class="event"><div class="event-body"><div class="event-top"><div><div class="device">${esc(dev.name||x.device_id)} · เซนเซอร์</div><div class="location">${esc(dev.location||'')}</div></div><span class="badge alert">เหตุการณ์เซนเซอร์</span></div><div class="event-metrics"><span class="metric">ระดับน้ำ <strong>${x.water_level?'ตรวจพบน้ำ':'ไม่พบน้ำ'}</strong></span><span class="metric">Flow <strong>${x.flow_rate==null?'—':x.flow_rate.toFixed(2)+' L/min'}</strong></span></div><div class="event-footer"><time class="event-time">${esc(new Date(x.captured_at).toLocaleString())}</time><span class="alert-status ${sent?'sent':'failed'}">${esc(alertLabel)}</span></div></div></article>`;
