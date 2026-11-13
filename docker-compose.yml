@@ -1,0 +1,33 @@
+services:
+  drain-watch:
+    build: .
+    image: drain-watch:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATA_DIR: /app/data
+      DEVICE_CONFIG: /app/config/devices.json
+      MODEL_PATH: /app/models/drain_trash.pt
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - drain-watch-data:/app/data
+      - ./config/devices.json:/app/config/devices.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=5)); assert d['status']=='ok' and d['model_loaded']"
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  drain-watch-data:

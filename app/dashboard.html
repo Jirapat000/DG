@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1718">
+  <title>Drain Watch</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1718;--surface:#102021;--surface-2:#142728;--surface-3:#1a3030;--text:#e7efec;--muted:#91aaa6;--quiet:#6f8884;--accent:#b4f16b;--accent-ink:#142019;--warning:#ffc27e;--danger:#ff9c83;--line:rgba(145,170,166,.12);--radius:20px;--shadow:0 18px 55px rgba(0,0,0,.16);font-family:Inter,"Noto Sans Thai",system-ui,sans-serif;background:var(--bg);color:var(--text);font-synthesis:none}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse 70% 42% at 72% -12%,rgba(35,93,77,.28),transparent 70%),var(--bg)}button,select{font:inherit}button,a,select{-webkit-tap-highlight-color:transparent}a{color:inherit;text-decoration:none}button:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+    .topbar{height:76px;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(18px,5vw,64px);background:rgba(11,23,24,.76);backdrop-filter:blur(18px);position:sticky;top:0;z-index:5;border-bottom:1px solid rgba(145,170,166,.08)}.brand{display:flex;align-items:center;gap:12px}.brand-mark{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:rgba(180,241,107,.12);color:var(--accent)}.brand-mark svg{width:21px;height:21px}.brand-name{font-size:14px;font-weight:750;letter-spacing:.09em}.brand-caption{font-size:11px;color:var(--quiet);margin-top:2px}.top-actions{display:flex;align-items:center;gap:10px}.live{display:inline-flex;align-items:center;gap:8px;padding:8px 11px;color:#bce98a;background:rgba(180,241,107,.08);border-radius:999px;font-size:12px;white-space:nowrap}.live-dot,.status-dot{width:7px;height:7px;background:var(--accent);border-radius:50%;box-shadow:0 0 12px rgba(180,241,107,.4)}.live.error{color:var(--danger);background:rgba(255,156,131,.08)}.live.error .live-dot{background:var(--danger);box-shadow:none}.icon-button{width:38px;height:38px;display:grid;place-items:center;border:0;border-radius:12px;background:var(--surface-2);color:var(--text);cursor:pointer;transition:background .16s,transform .16s}.icon-button:hover{background:var(--surface-3);transform:translateY(-1px)}.icon-button svg{width:17px;height:17px}.icon-button:disabled{opacity:.55;cursor:wait;transform:none}.icon-button.is-busy svg{animation:spin .85s linear infinite}
+    main{max-width:1392px;padding:42px clamp(18px,5vw,64px) 72px;margin:auto}.page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:30px}.eyebrow{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:700}.page-title{font-size:clamp(27px,4vw,38px);line-height:1.1;letter-spacing:-.035em;margin:9px 0 0;font-weight:680}.head-meta{display:flex;align-items:center;gap:12px}.updated{font-size:11px;color:var(--quiet);white-space:nowrap}.primary-link{height:40px;display:inline-flex;align-items:center;gap:9px;padding:0 15px;border-radius:12px;background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:750;transition:transform .16s,filter .16s}.primary-link:hover{transform:translateY(-1px);filter:brightness(1.04)}.primary-link svg{width:15px;height:15px}
+    .kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.kpi{min-height:126px;padding:18px 20px;border-radius:var(--radius);background:linear-gradient(145deg,rgba(255,255,255,.025),transparent 60%),var(--surface);box-shadow:var(--shadow);position:relative;overflow:hidden}.kpi-label{font-size:12px;color:var(--muted)}.kpi-value{font-size:32px;font-weight:680;letter-spacing:-.045em;font-variant-numeric:tabular-nums;margin-top:12px;line-height:1}.kpi-detail{font-size:10px;color:var(--quiet);margin-top:8px}.kpi.accent .kpi-value{color:var(--accent)}
+    .sensor-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:35px}.sensor{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 19px;border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);min-width:0}.sensor-label{font-size:11px;color:var(--muted)}.sensor-value{font-size:19px;font-weight:650;margin-top:6px;font-variant-numeric:tabular-nums}.sensor-meta{font-size:10px;color:var(--quiet);margin-top:4px}.sensor-state{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border-radius:999px;background:rgba(145,170,166,.08);color:#bfceca;font-size:10px;white-space:nowrap}.sensor-state.good{background:rgba(180,241,107,.09);color:#c6f294}.sensor-state.warn{background:rgba(255,194,126,.1);color:var(--warning)}.sensor-state .status-dot{width:6px;height:6px;background:currentColor;box-shadow:none}.sensor-state.good .status-dot{background:var(--accent)}.sensor-state.warn .status-dot{background:var(--warning)}
+    .section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}.section-title{font-size:17px;font-weight:650;margin:0;letter-spacing:-.02em}.section-count{font-size:11px;color:var(--quiet);margin-top:4px}.section-tools{display:flex;align-items:center;gap:8px}.select{height:37px;padding:0 32px 0 12px;border:0;border-radius:11px;background-color:var(--surface);color:var(--text);font-size:11px;cursor:pointer;max-width:210px}.events{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.event{min-width:0;border-radius:var(--radius);background:var(--surface);overflow:hidden;box-shadow:var(--shadow);transition:transform .18s,background .18s;position:relative;isolation:isolate}.event::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;opacity:0;background:radial-gradient(420px circle at var(--spot-x,50%) var(--spot-y,0%),rgba(180,241,107,.10),transparent 62%);transition:opacity .2s}.event:hover{transform:translateY(-2px);background:#122526}.event:hover::before{opacity:1}.event>*{position:relative;z-index:1}.photo-wrap{position:relative;aspect-ratio:16/9;background:#091314;overflow:hidden}.photo{width:100%;height:100%;display:block;object-fit:cover;transition:transform .35s}.event:hover .photo{transform:scale(1.015)}.photo-fallback{position:absolute;inset:0;display:grid;place-items:center;background:radial-gradient(ellipse at center,rgba(49,81,72,.28),transparent 65%),#0c191a;color:#54706b}.photo-fallback svg{width:34px;height:34px}.event-body{padding:15px 17px 17px}.event-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.device{font-size:13px;font-weight:650;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.location{font-size:10px;color:var(--quiet);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;white-space:nowrap;color:#b7c7c2}.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.badge.alert{color:var(--warning)}.badge.ok{color:#b9e88c}.badge.neutral{color:var(--muted)}.event-metrics{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}.metric{font-size:10px;color:var(--muted)}.metric strong{color:var(--text);font-weight:600}.event-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:13px}.event-time,.alert-status{font-size:10px;color:var(--quiet)}.alert-status{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.alert-status.sent{color:#b9e88c}.alert-status.failed{color:var(--warning)}
+    .empty,.error-state{grid-column:1/-1;min-height:250px;display:grid;place-items:center;text-align:center;padding:36px 20px;color:var(--muted);background:var(--surface);border-radius:var(--radius)}.empty svg{width:34px;height:34px;color:#66827b;margin-bottom:12px}.empty strong{display:block;font-size:13px;color:var(--text);font-weight:600}.empty span{display:block;font-size:11px;color:var(--quiet);margin-top:6px}.retry{border:0;background:transparent;color:var(--accent);font-size:11px;cursor:pointer;margin-top:14px}.skeleton-card{overflow:hidden;border-radius:var(--radius);background:var(--surface)}.skeleton-image{aspect-ratio:16/9}.skeleton-line{height:10px;border-radius:9px;margin:13px 16px;background:linear-gradient(90deg,#172b2b 20%,#203737 45%,#172b2b 70%);background-size:200% 100%;animation:shimmer 1.4s ease-in-out infinite}.skeleton-line.short{width:38%}.skeleton-line.medium{width:65%;margin-bottom:18px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    @keyframes spin{to{transform:rotate(360deg)}}@keyframes shimmer{to{background-position:-200% 0}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+    @media(max-width:780px){main{padding-top:32px}.page-head{align-items:flex-start;flex-direction:column;margin-bottom:24px}.head-meta{width:100%;justify-content:space-between}.kpi{min-height:112px;padding:16px}.kpi-value{font-size:27px}.events{grid-template-columns:1fr}}
+    @media(max-width:540px){.topbar{height:66px;padding:0 17px}.brand-caption{display:none}.brand-mark{width:35px;height:35px}.live{font-size:10px;padding:7px 9px}.updated{display:none}main{padding:27px 16px 48px}.page-title{font-size:29px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.kpi{min-height:105px;padding:15px;border-radius:17px}.kpi:last-child{grid-column:1/-1;min-height:92px}.sensor-row{grid-template-columns:1fr;gap:9px;margin-bottom:28px}.sensor{padding:15px 16px;border-radius:17px}.section-head{align-items:flex-start;flex-direction:column}.section-tools{width:100%;justify-content:space-between}.select{max-width:none;flex:1}.icon-button{width:37px;height:37px}.event{border-radius:17px}}
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="Drain Watch ภาพรวม">
+    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16M7 5v14m5-14v14m5-14v14"/></svg></span>
+    <span><span class="brand-name">DRAIN WATCH</span><span class="brand-caption">เฝ้าระวังขยะหน้าท่อ</span></span>
+  </a>
+  <div class="top-actions">
+    <div class="live" id="live" role="status" aria-live="polite"><span class="live-dot"></span><span>กำลังเชื่อมต่อ</span></div>
+    <button class="icon-button" id="refreshButton" type="button" aria-label="อัปเดตข้อมูล" title="อัปเดตข้อมูล">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9A7 7 0 0 1 18 6.5L20 12M4 12l2 5.5A7 7 0 0 0 18.4 15"/></svg>
+    </button>
+  </div>
+</header>
+<main>
+  <section class="page-head">
+    <div><div class="eyebrow">Drain monitoring</div><h1 class="page-title">ภาพรวมจุดเฝ้าระวัง</h1></div>
+    <div class="head-meta"><span class="updated" id="updatedAt">รอข้อมูล</span><a class="primary-link" href="/test"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"/><circle cx="9" cy="10" r="1.5"/><path d="m20 15-5-5-8 9"/></svg>ทดสอบโมเดล</a></div>
+  </section>
+
+  <section class="kpis" aria-label="สรุประบบ">
+    <article class="kpi"><div class="kpi-label">จุดติดตั้ง</div><div class="kpi-value" id="deviceCount">—</div><div class="kpi-detail">กล้องที่ตั้งค่าไว้</div></article>
+    <article class="kpi"><div class="kpi-label">ภาพวันนี้</div><div class="kpi-value" id="todayCount">—</div><div class="kpi-detail">จาก 200 รายการล่าสุด</div></article>
+    <article class="kpi accent"><div class="kpi-label">แจ้งเตือนส่งแล้ว</div><div class="kpi-value" id="alertCount">—</div><div class="kpi-detail">จาก 200 รายการล่าสุด</div></article>
+  </section>
+
+  <section class="sensor-row" aria-label="ข้อมูลเซนเซอร์ล่าสุด">
+    <article class="sensor"><div><div class="sensor-label">ระดับน้ำ · ลูกลอย 52 mm</div><div class="sensor-value" id="waterLevel">รอข้อมูล</div><div class="sensor-meta" id="waterTime">ยังไม่มีภาพจากอุปกรณ์</div></div><span class="sensor-state" id="waterState"><span class="status-dot"></span>รอข้อมูล</span></article>
+    <article class="sensor"><div><div class="sensor-label">อัตราการไหล · YF-201C</div><div class="sensor-value" id="flowRate">รอข้อมูล</div><div class="sensor-meta">หน่วย L/min</div></div><span class="sensor-state" id="flowState"><span class="status-dot"></span>รอข้อมูล</span></article>
+  </section>
+
+  <section aria-labelledby="eventsTitle">
+    <div class="section-head">
+      <div><h2 class="section-title" id="eventsTitle">ภาพและเหตุการณ์</h2><div class="section-count" id="eventCount">กำลังโหลด</div><div class="section-count" id="modelState">กำลังตรวจโมเดล</div></div>
+      <div class="section-tools"><label class="sr-only" for="deviceFilter">กรองตามจุดติดตั้ง</label><select class="select" id="deviceFilter"><option value="">ทุกจุดติดตั้ง</option></select></div>
+    </div>
+    <div class="events" id="events" aria-live="polite" aria-busy="true">
+      <article class="skeleton-card" aria-hidden="true"><div class="skeleton-image"></div><div class="skeleton-line short"></div><div class="skeleton-line medium"></div></article>
+      <article class="skeleton-card" aria-hidden="true"><div class="skeleton-image"></div><div class="skeleton-line short"></div><div class="skeleton-line medium"></div></article>
+    </div>
+  </section>
+</main>
+<script>
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $=s=>document.querySelector(s);
+const statusText={ok:'ไหลปกติ',slow:'ไหลช้า',no_flow:'ไม่พบการไหล'};
+let lastDevices=[];
+function setLive(text,error=false){$('#live').classList.toggle('error',error);$('#live').innerHTML=`<span class="live-dot"></span><span>${esc(text)}</span>`}
+function setState(node,text,tone=''){node.className=`sensor-state ${tone}`;node.innerHTML=`<span class="status-dot"></span>${esc(text)}`}
+function emptyState(title,detail){return `<div class="empty"><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18M5 7l1 13h12l1-13M9 7V4h6v3M9 11v5m6-5v5"/></svg><strong>${esc(title)}</strong><span>${esc(detail)}</span></div></div>`}
+function renderEvents(captures,devices){
+  $('#eventCount').textContent=captures.length?`${captures.length} ภาพล่าสุด`:'0 ภาพ';
+  if(!captures.length){$('#events').innerHTML=emptyState('ยังไม่มีภาพจากกล้อง','รอภาพแรกเพื่อเริ่มติดตาม');return}
+  $('#events').innerHTML=captures.map(x=>{
+    const dev=devices.find(y=>y.id===x.device_id)||{};
+    const approximate=x.model_status==='analyzed_bbox_estimate';
+    const coverage=x.coverage===null?'—':`${approximate?'≈ ':''}${(x.coverage*100).toFixed(1)}%`;
+    const over=x.coverage!==null&&x.coverage>x.alert_threshold;
+    const water=x.water_level===null||x.water_level===undefined?'—':x.water_level?'สูง':'ปกติ';
+    const flow=x.flow_rate==null?'—':`${x.flow_rate.toFixed(2)} L/min`;
+    const label=over?'ขยะเกินเกณฑ์':x.model_status==='analyzed'||approximate?'วิเคราะห์แล้ว':'ยังไม่มีผล';
+    const badge=over?'alert':x.coverage!==null?'ok':'neutral';
+    const sent=x.alert_status==='sent';
+    const alertLabel=sent?'LINE ส่งแล้ว':x.alert_status==='cooldown'?'อยู่ในช่วงพัก':x.alert_status==='not_configured'?'ยังไม่ตั้งค่า LINE':x.alert_status==='send_failed'?'ส่ง LINE ไม่สำเร็จ':x.alert_status;
+    const detections=x.detections?.length?x.detections.map(d=>d.class).join(', '):'ไม่พบขยะ';
+    const image=`/api/captures/${encodeURIComponent(x.id)}/image`;
+    return `<article class="event spotlight-card"><div class="photo-wrap"><div class="photo-fallback" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20"/></svg></div><img class="photo" loading="lazy" src="${image}?annotated=true" alt="ภาพตรวจจับ ${esc(dev.name||x.device_id)}" onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='${image}'}else{this.remove()}" onload="this.previousElementSibling.hidden=true"></div><div class="event-body"><div class="event-top"><div style="min-width:0"><div class="device">${esc(dev.name||x.device_id)}</div><div class="location">${esc(dev.location||'')}</div></div><span class="badge ${badge}">${esc(label)}</span></div><div class="event-metrics"><span class="metric">ขยะ <strong>${coverage}</strong></span><span class="metric">น้ำ <strong>${water}</strong></span><span class="metric">ไหล <strong>${flow}</strong></span><span class="metric">พบ <strong>${esc(detections)}</strong></span></div><div class="event-footer"><time class="event-time" datetime="${esc(x.captured_at)}">${esc(new Date(x.captured_at).toLocaleString())}</time><span class="alert-status ${sent?'sent':x.alert_status?.startsWith('send_failed')?'failed':''}" title="${esc(alertLabel)}">${esc(alertLabel)}</span></div>${x.error?`<div class="event-time" style="margin-top:8px">${esc(x.error)}</div>`:''}</div></article>`
+  }).join('');
+  $('#events').dataset.loaded='1';
+  $('#events').querySelectorAll('.spotlight-card').forEach(card=>card.addEventListener('pointermove',event=>{const rect=card.getBoundingClientRect();card.style.setProperty('--spot-x',`${event.clientX-rect.left}px`);card.style.setProperty('--spot-y',`${event.clientY-rect.top}px`)}));
+}
+async function refresh(){
+  const button=$('#refreshButton');button.disabled=true;button.classList.add('is-busy');
+  try{
+    const selected=$('#deviceFilter').value;
+    const query=selected?`&device_id=${encodeURIComponent(selected)}`:'';
+    const [healthRes,devicesRes,capturesRes]=await Promise.all([fetch('/api/health'),fetch('/api/devices'),fetch(`/api/captures?limit=200${query}`)]);
+    if(!healthRes.ok||!devicesRes.ok||!capturesRes.ok)throw new Error('โหลดข้อมูลไม่สำเร็จ');
+    const [health,devices,captures]=await Promise.all([healthRes.json(),devicesRes.json(),capturesRes.json()]);
+    lastDevices=devices;
+    const filter=$('#deviceFilter'),previous=filter.value;
+    filter.innerHTML='<option value="">ทุกจุดติดตั้ง</option>'+devices.map(d=>`<option value="${esc(d.id)}">${esc(d.name||d.id)}</option>`).join('');
+    if(devices.some(d=>d.id===previous))filter.value=previous;
+    const localDate=new Date().toLocaleDateString();
+    $('#deviceCount').textContent=devices.length;
+    $('#todayCount').textContent=captures.filter(x=>new Date(x.received_at).toLocaleDateString()===localDate).length;
+    $('#alertCount').textContent=captures.filter(x=>x.alert_sent).length;
+    const latest=captures[0];
+    if(latest){
+      const water=latest.water_level===null||latest.water_level===undefined?null:latest.water_level===1;
+      $('#waterLevel').textContent=water===null?'ไม่มีข้อมูล':water?'น้ำสูง':'ปกติ';
+      $('#waterTime').textContent=`อัปเดต ${new Date(latest.captured_at).toLocaleString()}`;
+      setState($('#waterState'),water===null?'ไม่มีข้อมูล':water?'ระดับสูง':'ปกติ',water?'warn':water===false?'good':'');
+      $('#flowRate').textContent=latest.flow_rate==null?'ไม่มีข้อมูล':`${latest.flow_rate.toFixed(2)} L/min`;
+      const flowTone=latest.flow_status==='ok'?'good':latest.flow_status==='slow'||latest.flow_status==='no_flow'?'warn':'';
+      setState($('#flowState'),statusText[latest.flow_status]||'ไม่มีข้อมูล',flowTone);
+    }else{
+      $('#waterLevel').textContent='ไม่มีข้อมูล';$('#waterTime').textContent='ยังไม่มีภาพจากอุปกรณ์';setState($('#waterState'),'รอข้อมูล');
+      $('#flowRate').textContent='ไม่มีข้อมูล';setState($('#flowState'),'รอข้อมูล');
+    }
+    setLive('เชื่อมต่อแล้ว');
+    $('#modelState').textContent=health.model_loaded?'โมเดลพร้อมตรวจจับ':'ยังไม่ได้ตั้งค่าโมเดล';
+    $('#updatedAt').textContent=`อัปเดต ${new Date().toLocaleTimeString()}`;
+    renderEvents(captures,devices);
+    $('#events').setAttribute('aria-busy','false');
+    document.title=health.model_loaded?'Drain Watch':'Drain Watch · ตรวจโมเดล';
+  }catch(error){
+    setLive('เชื่อมต่อไม่ได้',true);
+    if(!$('#events').dataset.loaded){$('#events').innerHTML=`<div class="error-state"><div><strong>โหลดข้อมูลไม่สำเร็จ</strong><span>ตรวจสอบเซิร์ฟเวอร์แล้วลองใหม่</span><button class="retry" type="button" onclick="refresh()">ลองอีกครั้ง</button></div></div>`}
+    $('#events').setAttribute('aria-busy','false');
+  }finally{button.disabled=false;button.classList.remove('is-busy')}
+}
+$('#refreshButton').addEventListener('click',refresh);
+$('#deviceFilter').addEventListener('change',()=>{delete $('#events').dataset.loaded;refresh()});
+refresh();setInterval(refresh,30000);
+</script>
+</body>
+</html>

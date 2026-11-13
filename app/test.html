@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1718">
+  <title>ทดสอบโมเดล · Drain Watch</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1718;--surface:#102021;--surface-2:#142728;--surface-3:#1a3030;--text:#e7efec;--muted:#91aaa6;--quiet:#6f8884;--accent:#b4f16b;--accent-ink:#142019;--warning:#ffc27e;--danger:#ff9c83;--line:rgba(145,170,166,.12);--radius:20px;--shadow:0 18px 55px rgba(0,0,0,.16);font-family:Inter,"Noto Sans Thai",system-ui,sans-serif;background:var(--bg);color:var(--text);font-synthesis:none}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse 70% 42% at 72% -12%,rgba(35,93,77,.28),transparent 70%),var(--bg)}button,a{-webkit-tap-highlight-color:transparent}button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}a{color:inherit;text-decoration:none}
+    .topbar{height:76px;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(18px,5vw,64px);background:rgba(11,23,24,.76);backdrop-filter:blur(18px);position:sticky;top:0;z-index:5;border-bottom:1px solid rgba(145,170,166,.08)}.brand{display:flex;align-items:center;gap:12px}.brand-mark{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:rgba(180,241,107,.12);color:var(--accent)}.brand-mark svg{width:21px;height:21px}.brand-name{display:block;font-size:14px;font-weight:750;letter-spacing:.09em}.brand-caption{display:block;font-size:11px;color:var(--quiet);margin-top:2px}.back{height:38px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border-radius:11px;background:var(--surface-2);color:var(--muted);font-size:11px;transition:background .16s,color .16s}.back:hover{background:var(--surface-3);color:var(--text)}.back svg{width:15px;height:15px}
+    main{max-width:1392px;margin:auto;padding:40px clamp(18px,5vw,64px) 72px}.eyebrow{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:700}.page-title{font-size:clamp(28px,4vw,39px);line-height:1.1;letter-spacing:-.035em;margin:9px 0 7px;font-weight:680}.page-subtitle{font-size:12px;color:var(--muted);margin:0 0 26px}.layout{display:grid;grid-template-columns:minmax(290px,370px) minmax(0,1fr);gap:14px;align-items:start}.panel{min-width:0;background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}.panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:18px 20px}.panel-title{margin:0;font-size:14px;font-weight:650}.panel-caption{margin:4px 0 0;font-size:10px;color:var(--quiet)}
+    .upload-form{padding:0 16px 16px}.drop{min-height:212px;border:1px dashed rgba(145,170,166,.28);border-radius:16px;background:linear-gradient(145deg,rgba(255,255,255,.025),transparent 60%),var(--surface-2);display:grid;place-items:center;text-align:center;padding:22px;cursor:pointer;transition:background .16s,border-color .16s,box-shadow .16s,transform .16s}.drop:hover,.drop.drag{background:var(--surface-3);border-color:rgba(180,241,107,.7);box-shadow:inset 0 0 0 1px rgba(180,241,107,.35),0 0 28px rgba(180,241,107,.07);transform:translateY(-1px)}.drop:focus-within{outline:2px solid var(--accent);outline-offset:3px}.drop-content svg{width:28px;height:28px;color:var(--accent)}.drop strong{display:block;font-size:12px;font-weight:630;margin-top:11px}.drop span{display:block;font-size:10px;color:var(--quiet);margin-top:5px}.file-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.file-row{display:none;align-items:center;gap:10px;margin:13px 1px 14px}.file-row.show{display:flex}.file-thumb{width:46px;height:46px;object-fit:cover;border-radius:11px;background:#091314}.file-info{min-width:0;flex:1}.file-name{font-size:10px;color:var(--text);white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.file-size{font-size:10px;color:var(--quiet);margin-top:4px}.remove-file{width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:10px;background:transparent;color:var(--muted);cursor:pointer}.remove-file:hover{background:var(--surface-3);color:var(--text)}.remove-file svg{width:15px;height:15px}.button{position:relative;overflow:hidden;width:100%;height:43px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:760;cursor:pointer;transition:filter .16s,transform .16s}.button::before{content:"";position:absolute;inset:-100% auto -100% -35%;width:25%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.48),transparent);transform:rotate(18deg);animation:button-shimmer 3.2s ease-in-out infinite;pointer-events:none}.button:disabled::before{animation:none;opacity:0}.button:hover:not(:disabled){filter:brightness(1.05);transform:translateY(-1px)}.button:disabled{opacity:.4;cursor:not-allowed}.button.loading{display:flex;align-items:center;justify-content:center;gap:9px}.spinner{width:14px;height:14px;border:2px solid rgba(20,32,25,.22);border-top-color:var(--accent-ink);border-radius:50%;animation:spin .8s linear infinite}.feedback{display:none;margin-top:12px;padding:10px 12px;border-radius:11px;background:rgba(255,156,131,.09);color:var(--danger);font-size:10px;line-height:1.5}.feedback.show{display:block}.limits{margin:13px 3px 0;border-top:1px solid var(--line);padding-top:11px}.limits summary{color:var(--quiet);font-size:10px;cursor:pointer;list-style:none}.limits summary::-webkit-details-marker{display:none}.limits summary::after{content:"+";float:right;color:var(--muted)}.limits[open] summary::after{content:"−"}.limits p{color:var(--quiet);font-size:10px;line-height:1.6;margin:9px 0 0}
+    .result-panel{min-height:500px}.result-header{padding:18px 20px 15px;display:flex;align-items:center;justify-content:space-between;gap:12px}.result-heading{min-width:0}.result-file{font-size:10px;color:var(--quiet);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.result-badge{display:inline-flex;align-items:center;gap:7px;font-size:10px;color:var(--muted);white-space:nowrap}.result-badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.result-badge.good{color:#b9e88c}.result-badge.warn{color:var(--warning)}.image-stage{position:relative;display:grid;place-items:center;min-height:300px;margin:0 14px 14px;border-radius:15px;background:radial-gradient(ellipse at center,rgba(41,69,63,.16),transparent 70%),#0b1718;overflow:hidden}.image-stage img{display:block;width:100%;max-height:590px;object-fit:contain}#annotated[hidden],#stats[hidden],#detections[hidden],#resultNote[hidden]{display:none}.stage-empty{max-width:240px;text-align:center;padding:32px;color:var(--quiet)}.stage-empty svg{width:32px;height:32px;color:#58746e;margin-bottom:12px}.stage-empty strong{display:block;font-size:11px;color:var(--muted);font-weight:600}.stage-empty span{display:block;font-size:10px;line-height:1.55;margin-top:5px}.stage-loading{display:none;position:absolute;inset:0;place-items:center;background:rgba(11,23,24,.84);backdrop-filter:blur(7px)}.stage-loading.show{display:grid}.loading-box{text-align:center}.loading-ring{width:27px;height:27px;margin:0 auto 11px;border:2px solid rgba(180,241,107,.17);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}.loading-label{font-size:10px;color:var(--muted)}.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;padding:0 14px 14px}.stat{min-width:0;padding:13px;border-radius:13px;background:var(--surface-2)}.stat-label{font-size:9px;color:var(--quiet)}.stat-value{font-size:18px;font-weight:650;margin-top:6px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.detections{padding:0 14px 15px}.detections-title{font-size:10px;color:var(--muted);margin:0 0 7px;font-weight:600}.det-row{display:flex;justify-content:space-between;gap:12px;padding:9px 11px;border-radius:10px;background:rgba(255,255,255,.025);font-size:10px;margin-top:5px}.det-score{color:var(--accent);font-variant-numeric:tabular-nums}.result-note{margin:0 14px 15px;padding:10px 12px;border-radius:10px;background:rgba(255,194,126,.07);color:#cfb890;font-size:9px;line-height:1.55}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    @keyframes spin{to{transform:rotate(360deg)}}@keyframes button-shimmer{0%,55%{left:-35%}100%{left:125%}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+    @media(max-width:780px){main{padding-top:30px}.layout{grid-template-columns:1fr}.result-panel{min-height:400px}.image-stage{min-height:250px}}
+    @media(max-width:520px){.topbar{height:66px;padding:0 17px}.brand-mark{width:35px;height:35px}.brand-caption{display:none}.back{font-size:10px;padding:0 10px}main{padding:26px 16px 48px}.page-title{font-size:30px}.page-subtitle{font-size:11px;line-height:1.5;margin-bottom:20px}.drop{min-height:176px}.result-panel{min-height:360px}.image-stage{min-height:210px;margin:0 10px 10px}.stats{gap:7px;padding:0 10px 10px}.stat{padding:10px}.stat-value{font-size:16px}.result-header{padding:15px 15px 13px}}
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="Drain Watch ภาพรวม">
+    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16M7 5v14m5-14v14m5-14v14"/></svg></span>
+    <span><span class="brand-name">DRAIN WATCH</span><span class="brand-caption">ทดสอบโมเดล</span></span>
+  </a>
+  <a class="back" href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6M9 12h11"/></svg>ภาพรวม</a>
+</header>
+<main>
+  <div class="eyebrow">Model playground</div>
+  <h1 class="page-title">ทดสอบภาพขยะ</h1>
+  <p class="page-subtitle">ผลทดสอบไม่ถูกบันทึกและไม่ส่ง LINE</p>
+  <div class="layout">
+    <section class="panel" aria-labelledby="uploadTitle">
+      <div class="panel-head"><div><h2 class="panel-title" id="uploadTitle">เลือกรูปภาพ</h2><p class="panel-caption">JPEG, PNG, WebP · ไม่เกิน 8 MB</p></div></div>
+      <form class="upload-form" id="form">
+        <label class="drop" id="drop" for="image">
+          <span class="drop-content"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M20 16.5v2a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-2"/></svg><strong>เลือกรูปหรือลากมาวาง</strong><span>แนะนำภาพหน้าตะแกรงท่อ</span></span>
+          <input class="file-input" id="image" name="image" type="file" accept="image/jpeg,image/png,image/webp" aria-label="เลือกรูปภาพ">
+        </label>
+        <div class="file-row" id="fileRow"><img class="file-thumb" id="fileThumb" alt="ตัวอย่างภาพที่เลือก"><div class="file-info"><div class="file-name" id="fileName"></div><div class="file-size" id="fileSize"></div></div><button class="remove-file" id="removeFile" type="button" aria-label="นำรูปออก"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+        <button class="button shimmer-button" id="submit" type="submit" disabled>วิเคราะห์ภาพ</button>
+        <div class="feedback" id="feedback" role="alert" aria-live="polite"></div>
+        <details class="limits"><summary>ข้อจำกัดโมเดล</summary><p>ใช้ภาพเต็มเป็น ROI และอาจประเมินพื้นที่จากกรอบตรวจจับ ค่าพื้นที่ไม่ใช่สัดส่วนการอุดตันที่ยืนยันภาคสนาม</p></details>
+      </form>
+    </section>
+
+    <section class="panel result-panel" aria-labelledby="resultTitle">
+      <div class="result-header"><div class="result-heading"><h2 class="panel-title" id="resultTitle">ผลวิเคราะห์</h2><div class="result-file" id="resultFile">ผลจะแสดงหลังวิเคราะห์ภาพ</div></div><span class="result-badge" id="resultBadge" role="status" aria-live="polite">รอภาพ</span></div>
+      <div class="image-stage" id="imageStage"><div class="stage-empty" id="stageEmpty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20"/></svg><strong>ยังไม่มีผลตรวจ</strong><span>เลือกรูปเพื่อดูกรอบและค่าความเชื่อมั่น</span></div><img id="annotated" alt="ภาพผลวิเคราะห์พร้อมกรอบตรวจจับ" hidden><div class="stage-loading" id="stageLoading"><div class="loading-box"><div class="loading-ring"></div><div class="loading-label">กำลังวิเคราะห์ภาพ</div></div></div></div>
+      <div class="stats" id="stats" hidden><div class="stat"><div class="stat-label">วัตถุ</div><div class="stat-value" id="count">—</div></div><div class="stat"><div class="stat-label">พื้นที่โดยประมาณ</div><div class="stat-value" id="coverage">—</div></div><div class="stat"><div class="stat-label">ขนาดภาพ</div><div class="stat-value" id="dimensions">—</div></div></div>
+      <div class="detections" id="detections" hidden><h3 class="detections-title">รายการที่พบ</h3><div id="detectionList"></div></div>
+      <div class="result-note" id="resultNote" hidden></div>
+    </section>
+  </div>
+</main>
+<script>
+const input=document.querySelector('#image'),drop=document.querySelector('#drop'),submit=document.querySelector('#submit'),feedback=document.querySelector('#feedback');
+const $=s=>document.querySelector(s);let selected=null,previewUrl=null,isAnalyzing=false;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function showError(text){feedback.textContent=text;feedback.classList.add('show')}
+function clearResult(){
+  $('#annotated').hidden=true;$('#stageEmpty').hidden=false;$('#stageEmpty').querySelector('strong').textContent='ยังไม่มีผลตรวจ';$('#stageEmpty').querySelector('span').textContent='เลือกรูปเพื่อดูกรอบและค่าความเชื่อมั่น';
+  $('#stats').hidden=true;$('#detections').hidden=true;$('#resultNote').hidden=true;$('#resultFile').textContent='ผลจะแสดงหลังวิเคราะห์ภาพ';$('#resultBadge').textContent='รอภาพ';$('#resultBadge').className='result-badge';
+}
+function setFile(file){
+  if(isAnalyzing)return;
+  feedback.classList.remove('show');selected=null;input.value='';submit.disabled=true;
+  if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl=null}
+  if(!file){$('#fileRow').classList.remove('show');$('#fileThumb').removeAttribute('src');clearResult();return}
+  if(!['image/jpeg','image/png','image/webp'].includes(file.type)){ $('#fileRow').classList.remove('show');clearResult();showError('เลือกไฟล์ JPEG, PNG หรือ WebP');return}
+  if(file.size>8*1024*1024){$('#fileRow').classList.remove('show');clearResult();showError('ไฟล์ใหญ่เกิน 8 MB');return}
+  clearResult();
+  selected=file;previewUrl=URL.createObjectURL(file);$('#fileThumb').src=previewUrl;$('#fileThumb').alt=`ตัวอย่าง ${file.name}`;
+  $('#fileName').textContent=file.name;$('#fileSize').textContent=`${(file.size/1024/1024).toFixed(2)} MB`;$('#fileRow').classList.add('show');submit.disabled=false;
+  $('#stageEmpty').querySelector('strong').textContent='พร้อมวิเคราะห์';$('#stageEmpty').querySelector('span').textContent='ตรวจชื่อไฟล์และกดวิเคราะห์ภาพ';$('#resultBadge').textContent='พร้อม';$('#resultFile').textContent=file.name;
+}
+input.addEventListener('change',()=>setFile(input.files[0]));
+for(const type of ['dragenter','dragover'])drop.addEventListener(type,e=>{e.preventDefault();drop.classList.add('drag')});
+for(const type of ['dragleave','drop'])drop.addEventListener(type,e=>{e.preventDefault();drop.classList.remove('drag')});
+drop.addEventListener('drop',e=>{const file=e.dataTransfer.files[0];if(file)setFile(file)});
+$('#removeFile').addEventListener('click',()=>setFile(null));
+$('#form').addEventListener('submit',async e=>{
+  e.preventDefault();if(!selected)return;const file=selected;isAnalyzing=true;input.disabled=true;$('#removeFile').disabled=true;submit.disabled=true;submit.classList.add('loading');submit.innerHTML='<span class="spinner" aria-hidden="true"></span>กำลังวิเคราะห์';feedback.classList.remove('show');$('#stageLoading').classList.add('show');$('#resultBadge').textContent='กำลังทำงาน';
+  try{
+    const body=new FormData();body.append('image',file);const response=await fetch('/api/test-image',{method:'POST',body});
+    const data=await response.json().catch(()=>({detail:'เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง'}));if(!response.ok)throw new Error(data.detail||'วิเคราะห์ภาพไม่สำเร็จ');
+    $('#annotated').src=data.annotated_image||'';$('#annotated').hidden=!data.annotated_image;$('#stageEmpty').hidden=!!data.annotated_image;
+    $('#resultFile').textContent=data.filename||file.name;$('#resultBadge').textContent=data.model_status==='analyzed_bbox_estimate'?'พื้นที่ประมาณ':'วิเคราะห์แล้ว';$('#resultBadge').className=`result-badge ${data.error?'warn':'good'}`;
+    $('#count').textContent=data.detections.length;$('#coverage').textContent=data.coverage===null?'—':`≈ ${(data.coverage*100).toFixed(1)}%`;$('#dimensions').textContent=`${data.width} × ${data.height}`;$('#stats').hidden=false;
+    $('#detectionList').innerHTML=data.detections.length?data.detections.map((d,i)=>`<div class="det-row"><span>${i+1}. ${esc(d.class)}</span><span class="det-score">${(d.confidence*100).toFixed(1)}%</span></div>`).join(''):'<div class="det-row"><span>ไม่พบวัตถุขยะ</span><span class="det-score">—</span></div>';
+    $('#detections').hidden=false;$('#resultNote').textContent=data.error||'คำนวณพื้นที่จากกรอบตรวจจับบนภาพเต็ม';$('#resultNote').hidden=false;
+  }catch(error){showError(error.message);$('#resultBadge').textContent='วิเคราะห์ไม่สำเร็จ';$('#resultBadge').className='result-badge warn'}
+  finally{isAnalyzing=false;input.disabled=false;$('#removeFile').disabled=false;$('#stageLoading').classList.remove('show');submit.disabled=!selected;submit.classList.remove('loading');submit.textContent='วิเคราะห์ภาพ'}
+});
+window.addEventListener('beforeunload',()=>{if(previewUrl)URL.revokeObjectURL(previewUrl)});
+</script>
+</body>
+</html>

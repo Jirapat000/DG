@@ -1,0 +1,47 @@
+services:
+  drain-watch:
+    build: .
+    image: drain-watch:production
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      APP_ENV: production
+      DATA_DIR: /app/data
+      DEVICE_CONFIG: /app/config/devices.json
+      MODEL_PATH: /app/models/drain_trash.pt
+    expose:
+      - "8000"
+    volumes:
+      - drain-watch-data:/app/data
+      - ./config/devices.json:/app/config/devices.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=5)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      - caddy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN in .env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  drain-watch-data:
+  caddy-data:
+  caddy-config:

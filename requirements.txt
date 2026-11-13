@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+python-multipart>=0.0.9
+pillow>=10.4
+numpy>=1.26
+ultralytics>=8.3
+python-dotenv>=1.0
+requests>=2.32
+shapely>=2.0

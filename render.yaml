@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: drain-watch-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATA_DIR
+        value: /tmp/drain-watch-data
+      - key: DEVICE_CONFIG
+        value: /app/config/devices.json
+      - key: MODEL_PATH
+        value: /app/models/drain_trash.pt
+      - key: ADMIN_USERNAME
+        value: operator
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: DEVICE_TOKENS_JSON
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
