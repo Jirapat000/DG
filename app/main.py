@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
@@ -7,6 +8,8 @@ import tempfile
 import uuid
 import base64
 import secrets
+import logging
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -31,11 +34,16 @@ DEVICE_CONFIG = Path(os.getenv("DEVICE_CONFIG", str(ROOT / "config/devices.json"
 THRESHOLD = float(os.getenv("ALERT_THRESHOLD", "0.50"))
 COOLDOWN_MINUTES = max(0, int(os.getenv("ALERT_COOLDOWN_MINUTES", "15")))
 MAX_IMAGE_BYTES = max(1, int(os.getenv("MAX_IMAGE_MB", "8"))) * 1024 * 1024
+MAX_STORED_CAPTURES = max(1, int(os.getenv("MAX_STORED_CAPTURES", "100")))
+CAPTURE_RETENTION_DAYS = max(1, int(os.getenv("CAPTURE_RETENTION_DAYS", "7")))
+MAX_CAPTURE_STORAGE_BYTES = max(1, int(os.getenv("MAX_CAPTURE_STORAGE_MB", "100"))) * 1024 * 1024
 CONFIDENCE = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 admin_auth = HTTPBasic(auto_error=False)
+logger = logging.getLogger(__name__)
+_retention_lock = threading.Lock()
 
 
 def load_json_env(key: str, fallback: Any) -> Any:
@@ -118,6 +126,108 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE captures ADD COLUMN {name} {sql_type}")
 
 
+def _managed_image_path(raw_path: str | None) -> Path | None:
+    if not raw_path:
+        return None
+    try:
+        path = Path(raw_path).resolve()
+        if path.parent != IMAGE_DIR.resolve() or path.suffix.lower() != ".jpg":
+            return None
+        return path
+    except (OSError, RuntimeError):
+        return None
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size if path.is_file() else 0
+    except OSError:
+        return 0
+
+
+def prune_captures(now: datetime | None = None) -> int:
+    """Keep recent captures within count, age, and image-storage limits."""
+    current = now or datetime.now(timezone.utc)
+    cutoff = current - timedelta(days=CAPTURE_RETENTION_DAYS)
+    max_bytes = MAX_CAPTURE_STORAGE_BYTES
+    deleted_rows: list[sqlite3.Row] = []
+    kept_rows: list[sqlite3.Row] = []
+    used_bytes = 0
+
+    with _retention_lock:
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT id, received_at, image_path, annotated_path FROM captures ORDER BY received_at DESC, rowid DESC"
+            ).fetchall()
+            for row in rows:
+                try:
+                    received = datetime.fromisoformat(row["received_at"])
+                    if received.tzinfo is None:
+                        received = received.replace(tzinfo=timezone.utc)
+                except (TypeError, ValueError):
+                    received = datetime.min.replace(tzinfo=timezone.utc)
+
+                paths = [p for p in (
+                    _managed_image_path(row["image_path"]),
+                    _managed_image_path(row["annotated_path"]),
+                ) if p is not None]
+                row_bytes = sum(_file_size(p) for p in paths)
+                exceeds_limits = (
+                    received < cutoff
+                    or len(kept_rows) >= MAX_STORED_CAPTURES
+                    or used_bytes + row_bytes > max_bytes
+                )
+                if exceeds_limits:
+                    deleted_rows.append(row)
+                else:
+                    kept_rows.append(row)
+                    used_bytes += row_bytes
+
+            if deleted_rows:
+                conn.executemany("DELETE FROM captures WHERE id=?", [(row["id"],) for row in deleted_rows])
+
+        removed_files = 0
+        for row in deleted_rows:
+            for raw_path in (row["image_path"], row["annotated_path"]):
+                path = _managed_image_path(raw_path)
+                if path is not None and path.exists():
+                    try:
+                        path.unlink()
+                        removed_files += 1
+                    except OSError as exc:
+                        logger.warning("Could not remove expired capture image %s: %s", path.name, exc.__class__.__name__)
+
+        # Remove crash-leftover JPEGs only after they are at least one hour old,
+        # so a concurrent upload that has not inserted its row is not affected.
+        referenced = {
+            p.resolve()
+            for row in kept_rows
+            for p in (_managed_image_path(row["image_path"]), _managed_image_path(row["annotated_path"]))
+            if p is not None
+        }
+        orphan_cutoff = current.timestamp() - 3600
+        for path in IMAGE_DIR.glob("*.jpg"):
+            try:
+                if path.resolve() not in referenced and path.stat().st_mtime < orphan_cutoff:
+                    path.unlink()
+                    removed_files += 1
+            except OSError as exc:
+                logger.warning("Could not remove orphan capture image %s: %s", path.name, exc.__class__.__name__)
+
+        if deleted_rows or removed_files:
+            logger.info("Capture retention removed %s records and %s image files", len(deleted_rows), removed_files)
+    return len(deleted_rows)
+
+
+async def retention_worker() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await run_in_threadpool(prune_captures)
+        except Exception:
+            logger.exception("Periodic capture retention cleanup failed")
+
+
 class TrashSegmenter:
     def __init__(self) -> None:
         self.model = None
@@ -195,9 +305,18 @@ async def lifespan(_: FastAPI):
     global segmenter
     validate_production_config()
     init_db()
+    prune_captures()
     devices_config()
     segmenter = TrashSegmenter()
-    yield
+    cleanup_task = asyncio.create_task(retention_worker())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="Drain Watch API", version="0.1.0", lifespan=lifespan)
@@ -271,6 +390,9 @@ def model_test_page() -> str:
 def health() -> dict[str, Any]:
     return {"status": "ok", "model_loaded": bool(segmenter and segmenter.model),
             "alert_threshold": THRESHOLD,
+            "retention": {"max_captures": MAX_STORED_CAPTURES,
+                          "max_age_days": CAPTURE_RETENTION_DAYS,
+                          "max_image_storage_mb": MAX_CAPTURE_STORAGE_BYTES // (1024 * 1024)},
             "line_configured": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
             "line_delivery": "broadcast_to_oa_friends"}
 
@@ -394,6 +516,7 @@ async def create_capture(device_id: str = Form(...), captured_at: str = Form(...
              str(original_path), str(annotated_path) if annotated_path.exists() else None,
              analysis["status"], analysis["coverage"], THRESHOLD, int(alert_sent), alert_status,
              json.dumps(analysis["detections"]), analysis["error"], water_level, flow_rate, flow_status))
+    await run_in_threadpool(prune_captures)
     return {"id": capture_id, "device_id": device_id, "model_status": analysis["status"],
             "coverage": analysis["coverage"], "threshold": THRESHOLD, "detections": analysis["detections"],
             "alert_sent": alert_sent, "alert_status": alert_status, "error": analysis["error"]}

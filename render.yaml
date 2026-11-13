@@ -15,6 +15,12 @@ services:
         value: /app/config/devices.json
       - key: MODEL_PATH
         value: /app/models/drain_trash.pt
+      - key: MAX_STORED_CAPTURES
+        value: "100"
+      - key: CAPTURE_RETENTION_DAYS
+        value: "7"
+      - key: MAX_CAPTURE_STORAGE_MB
+        value: "100"
       - key: ADMIN_USERNAME
         value: operator
       - key: ADMIN_PASSWORD
