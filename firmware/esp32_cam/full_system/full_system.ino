@@ -30,8 +30,9 @@ static const int Y5_GPIO_NUM = 21, Y4_GPIO_NUM = 19, Y3_GPIO_NUM = 18, Y2_GPIO_N
 
 static volatile uint32_t flowPulseCount = 0;
 static bool cameraReady = false, flashOn = false, lastWaterPresent = false;
+static bool sleepGuardInitialized = false, sleepConfirmed = false;
 static float flowRateLpm = 0.0f;
-static uint32_t lastFlowSample = 0, lastTelemetry = 0, lastCommandPoll = 0;
+static uint32_t lastFlowSample = 0, lastTelemetry = 0, lastCommandPoll = 0, lastSleepCheck = 0, lastGuardReset = 0;
 static uint32_t lastCapture = 0, noWaterSince = 0;
 static bool hasCapturedSinceWet = false;
 
@@ -49,6 +50,15 @@ void applyFlash(bool enabled) {
   flashOn = enabled;
   digitalWrite(FLASH_LED_PIN, flashOn ? HIGH : LOW);
   Serial.printf("FLASH: %s\n", flashOn ? "ON" : "OFF");
+}
+
+void flashBootSignal() {
+  Serial.println("BOOT SIGNAL: flash blink 2x");
+  for (int i = 0; i < 2; ++i) {
+    digitalWrite(FLASH_LED_PIN, HIGH); delay(120);
+    digitalWrite(FLASH_LED_PIN, LOW); delay(180);
+  }
+  flashOn = false;
 }
 
 bool connectWiFi() {
@@ -124,6 +134,7 @@ bool uploadTelemetry(const char *mode) {
   body += multipartField(boundary, "flow_status", flowStatus());
   body += multipartField(boundary, "device_mode", mode);
   body += multipartField(boundary, "flash_on", flashOn ? "true" : "false");
+  body += multipartField(boundary, "camera_ready", cameraReady ? "true" : "false");
   body += "--" + boundary + "--\r\n";
 
   WiFiClientSecure secure;
@@ -152,6 +163,51 @@ void pollFlashControl() {
   desired.trim(); http.end();
   if (desired == "ON" && !flashOn) applyFlash(true);
   else if (desired == "OFF" && flashOn) applyFlash(false);
+}
+
+bool resetSleepConfirmation() {
+  if (!connectWiFi()) return false;
+  WiFiClientSecure secure; secure.setCACert(ROOT_CA);
+  HTTPClient http;
+  const String url = String("https://") + API_HOST + "/api/devices/" + DEVICE_ID + "/sleep-confirmation/reset";
+  if (!http.begin(secure, url)) return false;
+  http.setConnectTimeout(10000); http.setTimeout(10000);
+  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  const int code = http.POST(String("camera_ready=") + (cameraReady ? "true" : "false"));
+  const String response = code > 0 ? http.getString() : HTTPClient::errorToString(code);
+  http.end();
+  if (code >= 200 && code < 300) {
+    sleepGuardInitialized = true; sleepConfirmed = false;
+    Serial.println("SLEEP GUARD: reset; waiting for dashboard readiness confirmation");
+    return true;
+  }
+  Serial.printf("SLEEP GUARD RESET FAILED: HTTP %d %s\n", code, response.substring(0, 120).c_str());
+  return false;
+}
+
+void pollSleepConfirmation() {
+  if (!sleepGuardInitialized || !connectWiFi()) return;
+  WiFiClientSecure secure; secure.setCACert(ROOT_CA);
+  HTTPClient http;
+  const String url = String("https://") + API_HOST + "/api/devices/" + DEVICE_ID + "/sleep-confirmation";
+  if (!http.begin(secure, url)) return;
+  http.setConnectTimeout(10000); http.setTimeout(10000);
+  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+  const int code = http.GET();
+  String value = code == 200 ? http.getString() : "";
+  http.end(); value.trim();
+  if (code != 200) {
+    Serial.printf("SLEEP GUARD POLL FAILED: HTTP %d\n", code);
+    sleepConfirmed = false;
+    return;
+  }
+  const bool confirmed = value == "READY";
+  if (confirmed != sleepConfirmed) {
+    Serial.printf("SLEEP GUARD: %s\n", confirmed ? "confirmed; sleep allowed after idle rule" : "not confirmed; sleep blocked");
+    if (confirmed) noWaterSince = millis(); // Start a fresh 10-minute idle window after the user confirms readiness.
+  }
+  sleepConfirmed = confirmed;
 }
 
 bool captureAndUpload(const String &commandId = "") {
@@ -227,6 +283,10 @@ void pollWebCapture() {
 }
 
 void enterDeepSleep() {
+  if (!sleepGuardInitialized || !sleepConfirmed) {
+    Serial.println("Sleep blocked: waiting for dashboard readiness confirmation.");
+    return;
+  }
   Serial.println("No float water and no flow for 10 minutes; reporting deep sleep.");
   applyFlash(false);
   uploadTelemetry("deep_sleep");
@@ -246,13 +306,15 @@ void setup() {
   Serial.println("Float=GPIO14 (active LOW); flow pulse=GPIO13; flash=GPIO4");
   rtc_gpio_deinit(GPIO_NUM_14);
   pinMode(FLOAT_PIN, INPUT_PULLUP); pinMode(FLOW_PIN, INPUT_PULLUP);
-  pinMode(FLASH_LED_PIN, OUTPUT); applyFlash(false);
+  pinMode(FLASH_LED_PIN, OUTPUT); digitalWrite(FLASH_LED_PIN, LOW); flashBootSignal();
   attachInterrupt(digitalPinToInterrupt(FLOW_PIN), countFlowPulse, FALLING);
   if (!setupCamera()) { Serial.println("Camera unavailable; sensor telemetry continues"); }
   else cameraReady = true;
-  if (!connectWiFi()) { Serial.println("No Wi-Fi; retrying in 10s"); delay(10000); ESP.restart(); }
+  if (connectWiFi()) resetSleepConfirmation();
+  else Serial.println("Wi-Fi unavailable; staying awake and retrying; deep sleep remains blocked");
+  lastGuardReset = millis();
   lastFlowSample = millis(); lastTelemetry = millis() - TELEMETRY_INTERVAL_MS;
-  lastCommandPoll = millis();
+  lastCommandPoll = millis(); lastSleepCheck = millis();
   pollFlashControl();
   const bool water = digitalRead(FLOAT_PIN) == FLOAT_WATER_LEVEL;
   lastWaterPresent = water;
@@ -262,8 +324,14 @@ void setup() {
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) connectWiFi();
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+  }
   const uint32_t now = millis();
+  if (WiFi.status() == WL_CONNECTED && !sleepGuardInitialized && now - lastGuardReset >= COMMAND_INTERVAL_MS) {
+    lastGuardReset = now;
+    resetSleepConfirmation();
+  }
   sampleFlow(now);
   const bool waterPresent = digitalRead(FLOAT_PIN) == FLOAT_WATER_LEVEL;
   if (waterPresent != lastWaterPresent) {
@@ -285,6 +353,15 @@ void loop() {
     pollFlashControl();
     pollWebCapture();
   }
-  if (!waterPresent && flowRateLpm <= 0.01f && now - noWaterSince >= NO_WATER_SLEEP_MS) enterDeepSleep();
+  if (now - lastSleepCheck >= COMMAND_INTERVAL_MS) {
+    lastSleepCheck = now;
+    pollSleepConfirmation();
+  }
+  if (!waterPresent && flowRateLpm <= 0.01f && now - noWaterSince >= NO_WATER_SLEEP_MS) {
+    if (sleepGuardInitialized && sleepConfirmed) enterDeepSleep();
+    else if (now - noWaterSince < NO_WATER_SLEEP_MS + COMMAND_INTERVAL_MS) {
+      Serial.println("Idle rule met, but deep sleep is blocked until user confirms readiness on dashboard.");
+    }
+  }
   delay(30);
 }

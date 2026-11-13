@@ -52,8 +52,8 @@
 
   <section class="device-control" aria-labelledby="deviceControlTitle">
     <div><h2 class="device-control-title" id="deviceControlTitle">สถานะและควบคุมอุปกรณ์</h2><div class="device-control-meta" id="deviceRuntime">กำลังโหลดสถานะสด</div></div>
-    <div class="device-actions"><button class="control-button primary" id="captureNow" type="button">ถ่ายภาพตอนนี้</button><button class="control-button" id="flashToggle" type="button" aria-pressed="false">เปิดแฟลช</button></div>
-    <div class="device-message" id="deviceMessage" role="status" aria-live="polite">โหมด deep sleep จะปลุกด้วยลูกลอย; คำสั่งเว็บทำงานเมื่ออุปกรณ์ตื่นและออนไลน์</div>
+    <div class="device-actions"><button class="control-button primary" id="captureNow" type="button">ถ่ายภาพตอนนี้</button><button class="control-button" id="flashToggle" type="button" aria-pressed="false">เปิดแฟลช</button><button class="control-button" id="sleepConfirm" type="button">ยืนยันพร้อมทำงาน</button></div>
+    <div class="device-message" id="deviceMessage" role="status" aria-live="polite">หลังบอร์ดเชื่อมต่อสำเร็จ ให้ยืนยันความพร้อมหนึ่งครั้งก่อนอนุญาตให้เข้าสลีปตามเงื่อนไข</div>
   </section>
 
   <section aria-labelledby="eventsTitle">
@@ -77,12 +77,14 @@ function setLive(text,error=false){$('#live').classList.toggle('error',error);$(
 function setState(node,text,tone=''){node.className=`sensor-state ${tone}`;node.innerHTML=`<span class="status-dot"></span>${esc(text)}`}
 function currentDevice(){const chosen=$('#deviceFilter').value;return liveStatus.find(x=>x.id===chosen)||liveStatus[0]||null}
 function renderDeviceStatus(){
-  const item=currentDevice();const captureButton=$('#captureNow'),flashButton=$('#flashToggle');
-  if(!item){$('#deviceRuntime').textContent='รอการเชื่อมต่อจาก ESP32-CAM';setLive('รอการเชื่อมต่อ ESP32-CAM',true);captureButton.disabled=true;flashButton.disabled=true;return}
+  const item=currentDevice();const captureButton=$('#captureNow'),flashButton=$('#flashToggle'),sleepButton=$('#sleepConfirm');
+  if(!item){$('#deviceRuntime').textContent='รอการเชื่อมต่อจาก ESP32-CAM';setLive('รอการเชื่อมต่อ ESP32-CAM',true);captureButton.disabled=true;flashButton.disabled=true;sleepButton.disabled=true;return}
   const labels={online:'เชื่อมต่อแล้ว',offline:'รอการเชื่อมต่อ',sleeping:'deep sleep'};const modes={active:'ทำงานอยู่',deep_sleep:'พักระบบ รอลูกลอยปลุก',standby:'สแตนด์บาย',unknown:'รอสถานะ'};
   const age=item.last_seen?`อัปเดตล่าสุด ${new Date(item.last_seen).toLocaleTimeString()}`:'ยังไม่เคยรายงาน';
-  $('#deviceRuntime').textContent=`${item.name||item.id} · ${labels[item.connection]||item.connection} · ${modes[item.mode]||item.mode} · ${age}`;
-  if(item.connection==='online')setLive('ESP32-CAM เชื่อมต่อแล้ว');
+  const cameraReady=!!item.camera_ready;
+  $('#deviceRuntime').textContent=`${item.name||item.id} · ${labels[item.connection]||item.connection} · ${modes[item.mode]||item.mode} · กล้อง${cameraReady?'พร้อม':'ไม่พร้อม'} · ${age}`;
+  if(item.connection==='online'&&cameraReady)setLive('ESP32-CAM เชื่อมต่อแล้ว · กล้องพร้อม');
+  else if(item.connection==='online')setLive('API เชื่อมต่อแล้ว แต่กล้องไม่พร้อม',true);
   else if(item.connection==='sleeping')setLive('ESP32-CAM อยู่ใน deep sleep');
   else setLive('รอการเชื่อมต่อ ESP32-CAM',true);
   const water=item.water_level===null||item.water_level===undefined?null:item.water_level===1;
@@ -91,12 +93,15 @@ function renderDeviceStatus(){
   setState($('#waterState'),water===null?'รอข้อมูล':water?'ตรวจพบน้ำ':'ไม่พบน้ำ',water?'warn':water===false?'good':'');
   $('#flowRate').textContent=item.flow_rate===null||item.flow_rate===undefined?'ไม่มีข้อมูล':`${Number(item.flow_rate).toFixed(2)} L/min`;
   setState($('#flowState'),statusText[item.flow_status]||'รอข้อมูล',item.flow_status==='ok'?'good':item.flow_status==='slow'||item.flow_status==='no_flow'?'warn':'');
-  const asleep=item.connection==='sleeping';captureButton.disabled=asleep||item.connection==='offline';flashButton.disabled=item.connection==='offline';
+  const asleep=item.connection==='sleeping';const online=item.connection==='online';captureButton.disabled=asleep||!online||!cameraReady;flashButton.disabled=!online;sleepButton.disabled=!online||!cameraReady;
+  sleepButton.textContent=!cameraReady?'กล้องยังไม่พร้อม':item.sleep_ready?'ยืนยันแล้ว · ยกเลิกสิทธิ์สลีป':'ยืนยันพร้อมทำงาน';sleepButton.classList.toggle('primary',online&&cameraReady&&!item.sleep_ready);
   flashButton.textContent=item.flash_requested?'ปิดแฟลช':'เปิดแฟลช';flashButton.setAttribute('aria-pressed',String(item.flash_requested));
   flashButton.classList.toggle('primary',item.flash_requested);
-  if(asleep)$('#deviceMessage').textContent='กำลัง deep sleep; ปลุกด้วยลูกลอย GPIO14 แล้วคำสั่งถ่ายภาพ/แฟลชที่ค้างไว้จึงจะทำงาน';
+  if(asleep)$('#deviceMessage').textContent='กำลัง deep sleep; เมื่อลูกลอยปลุก แฟลชจะกระพริบ 2 ครั้งและต้องยืนยันความพร้อมใหม่';
   else if(item.connection==='offline')$('#deviceMessage').textContent='อุปกรณ์ออฟไลน์; ตรวจไฟเลี้ยงและ Wi-Fi แล้วคำสั่งเว็บจึงจะถึงบอร์ด';
-  else $('#deviceMessage').textContent=`แฟลช ${item.flash_on?'ติด':'ดับ'} · อัปเดตสถานะสดทุก 5 วินาที · deep sleep ไม่รับคำสั่งผ่านเว็บ`;
+  else if(!cameraReady)$('#deviceMessage').textContent='บอร์ดติดต่อ API ได้ แต่กล้องยังไม่พร้อม; ตรวจ Serial Monitor ที่บรรทัด Camera init failed/Camera unavailable';
+  else if(!item.sleep_ready)$('#deviceMessage').textContent=`อุปกรณ์ออนไลน์ · แฟลช ${item.flash_on?'ติด':'ดับ'} · รอผู้ใช้ยืนยันพร้อมทำงาน; ยังไม่อนุญาต deep sleep`;
+  else $('#deviceMessage').textContent=`ยืนยันพร้อมแล้ว · แฟลช ${item.flash_on?'ติด':'ดับ'} · เข้าสลีปได้เมื่อไม่พบน้ำและไม่มี flow ต่อเนื่อง 10 นาที`;
 }
 function emptyState(title,detail){return `<div class="empty"><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18M5 7l1 13h12l1-13M9 7V4h6v3M9 11v5m6-5v5"/></svg><strong>${esc(title)}</strong><span>${esc(detail)}</span></div></div>`}
 function renderEvents(captures,devices){
@@ -170,6 +175,12 @@ $('#captureNow').addEventListener('click',async()=>{
 $('#flashToggle').addEventListener('click',async()=>{
   const device=currentDevice();if(!device)return;const button=$('#flashToggle');button.disabled=true;const form=new FormData();form.append('enabled',String(!device.flash_requested));
   try{const response=await fetch(`/api/devices/${encodeURIComponent(device.id)}/flash`,{method:'POST',body:form});const data=await response.json();if(!response.ok)throw new Error(data.detail||'ตั้งค่าแฟลชไม่สำเร็จ');$('#deviceMessage').textContent=data.mode==='deep_sleep'?'บันทึกคำสั่งแฟลชแล้ว จะใช้เมื่ออุปกรณ์ตื่นจากลูกลอย':'ส่งคำสั่งแฟลชแล้ว รออุปกรณ์ยืนยัน';await refreshDeviceStatus()}catch(error){$('#deviceMessage').textContent=error.message;$('#deviceMessage').classList.add('error')}finally{button.disabled=false}
+});
+$('#sleepConfirm').addEventListener('click',async()=>{
+  const device=currentDevice();if(!device||device.connection!=='online'||!device.camera_ready)return;const button=$('#sleepConfirm');button.disabled=true;
+  const ready=!device.sleep_ready;const form=new FormData();form.append('ready',String(ready));
+  try{const response=await fetch(`/api/devices/${encodeURIComponent(device.id)}/sleep-confirmation`,{method:'POST',body:form});const data=await response.json();if(!response.ok)throw new Error(data.detail||'บันทึกการยืนยันไม่สำเร็จ');$('#deviceMessage').textContent=ready?'ยืนยันแล้ว: ระบบอนุญาต deep sleep เมื่อเข้าเงื่อนไขครบ':'ยกเลิกการยืนยัน: ระบบจะไม่เข้า deep sleep';await refreshDeviceStatus()}
+  catch(error){$('#deviceMessage').textContent=error.message;$('#deviceMessage').classList.add('error')}finally{renderDeviceStatus()}
 });
 $('#refreshButton').addEventListener('click',refresh);
 $('#deviceFilter').addEventListener('change',()=>{delete $('#events').dataset.loaded;refresh();renderDeviceStatus()});

@@ -129,7 +129,8 @@ def init_db() -> None:
         conn.execute("""CREATE TABLE IF NOT EXISTS device_status (
             device_id TEXT PRIMARY KEY, last_seen TEXT NOT NULL, device_mode TEXT NOT NULL,
             water_level INTEGER, flow_rate REAL, flow_status TEXT, flash_on INTEGER NOT NULL DEFAULT 0,
-            flash_requested INTEGER NOT NULL DEFAULT 1
+            flash_requested INTEGER NOT NULL DEFAULT 0, sleep_ready INTEGER NOT NULL DEFAULT 0,
+            camera_ready INTEGER NOT NULL DEFAULT 0
         )""")
         conn.execute("""CREATE TABLE IF NOT EXISTS alert_cooldowns (
             device_id TEXT PRIMARY KEY, last_alert_at TEXT NOT NULL
@@ -138,6 +139,11 @@ def init_db() -> None:
         for name, sql_type in (("water_level", "INTEGER"), ("flow_rate", "REAL"), ("flow_status", "TEXT")):
             if name not in columns:
                 conn.execute(f"ALTER TABLE captures ADD COLUMN {name} {sql_type}")
+        device_columns = {row[1] for row in conn.execute("PRAGMA table_info(device_status)")}
+        if "sleep_ready" not in device_columns:
+            conn.execute("ALTER TABLE device_status ADD COLUMN sleep_ready INTEGER NOT NULL DEFAULT 0")
+        if "camera_ready" not in device_columns:
+            conn.execute("ALTER TABLE device_status ADD COLUMN camera_ready INTEGER NOT NULL DEFAULT 0")
 
 
 def _managed_image_path(raw_path: str | None) -> Path | None:
@@ -515,7 +521,7 @@ def device_status() -> list[dict[str, Any]]:
                            "location": device.get("location", ""), "connection": "offline",
                            "mode": "unknown", "last_seen": None, "water_level": None,
                            "flow_rate": None, "flow_status": None, "flash_on": False,
-                           "flash_requested": True})
+                           "flash_requested": False, "sleep_ready": False, "camera_ready": False})
             continue
         seen = datetime.fromisoformat(row["last_seen"])
         if seen.tzinfo is None:
@@ -527,7 +533,9 @@ def device_status() -> list[dict[str, Any]]:
                        "mode": row["device_mode"], "last_seen": row["last_seen"],
                        "water_level": row["water_level"], "flow_rate": row["flow_rate"],
                        "flow_status": row["flow_status"], "flash_on": bool(row["flash_on"]),
-                       "flash_requested": bool(row["flash_requested"])})
+                       "flash_requested": bool(row["flash_requested"]),
+                       "sleep_ready": bool(row["sleep_ready"]),
+                       "camera_ready": bool(row["camera_ready"])})
     return result
 
 
@@ -543,12 +551,51 @@ def request_flash(device_id: str, enabled: bool = Form(...)) -> dict[str, Any]:
     return {"device_id": device_id, "requested": enabled, "applied": bool(row["flash_on"]), "mode": row["device_mode"]}
 
 
+@app.post("/api/devices/{device_id}/sleep-confirmation/reset")
+def reset_sleep_confirmation(device_id: str, camera_ready: bool = Form(False),
+                             x_device_token: str = Header(default="")) -> dict[str, Any]:
+    """Require a fresh dashboard readiness confirmation after every boot/wake."""
+    require_device_token(device_id, x_device_token)
+    now = datetime.now(timezone.utc).isoformat()
+    with db() as conn:
+        conn.execute("INSERT INTO device_status(device_id,last_seen,device_mode,sleep_ready,camera_ready,flash_on,flash_requested) VALUES(?,?,?,0,?,0,0) "
+                     "ON CONFLICT(device_id) DO UPDATE SET last_seen=excluded.last_seen,device_mode='active',sleep_ready=0,camera_ready=excluded.camera_ready,flash_on=0,flash_requested=0",
+                     (device_id, now, "active", int(camera_ready)))
+    return {"device_id": device_id, "sleep_ready": False, "camera_ready": camera_ready,
+            "status": "awaiting_confirmation"}
+
+
+@app.get("/api/devices/{device_id}/sleep-confirmation", response_class=PlainTextResponse)
+def get_sleep_confirmation(device_id: str, x_device_token: str = Header(default="")) -> str:
+    require_device_token(device_id, x_device_token)
+    with db() as conn:
+        row = conn.execute("SELECT sleep_ready FROM device_status WHERE device_id=?", (device_id,)).fetchone()
+    return "READY" if row and row["sleep_ready"] else "WAIT"
+
+
+@app.post("/api/devices/{device_id}/sleep-confirmation", dependencies=[Depends(require_admin)])
+def set_sleep_confirmation(device_id: str, ready: bool = Form(...)) -> dict[str, Any]:
+    if device_id not in devices_config():
+        raise HTTPException(404, "Unknown device")
+    with db() as conn:
+        row = conn.execute("SELECT last_seen,device_mode,camera_ready FROM device_status WHERE device_id=?", (device_id,)).fetchone()
+        if not row:
+            raise HTTPException(409, "อุปกรณ์ยังไม่ส่งสถานะจากบอร์ด")
+        seen = datetime.fromisoformat(row["last_seen"])
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        if ready and (row["device_mode"] == "deep_sleep" or not row["camera_ready"] or datetime.now(timezone.utc) - seen > timedelta(seconds=45)):
+            raise HTTPException(409, "ยืนยันได้เมื่อบอร์ดออนไลน์และกล้องพร้อมเท่านั้น")
+        conn.execute("UPDATE device_status SET sleep_ready=? WHERE device_id=?", (int(ready), device_id))
+    return {"device_id": device_id, "sleep_ready": ready}
+
+
 @app.get("/api/devices/{device_id}/flash-desired", response_class=PlainTextResponse)
 def desired_flash(device_id: str, x_device_token: str = Header(default="")) -> str:
     require_device_token(device_id, x_device_token)
     with db() as conn:
         row = conn.execute("SELECT flash_requested FROM device_status WHERE device_id=?", (device_id,)).fetchone()
-    return "OFF" if row and not row["flash_requested"] else "ON"
+    return "ON" if row and row["flash_requested"] else "OFF"
 
 
 @app.post("/api/test-image", dependencies=[Depends(require_admin)])
@@ -692,7 +739,8 @@ async def create_capture(device_id: str = Form(...), captured_at: str = Form(...
 async def create_telemetry(device_id: str = Form(...), captured_at: str = Form(...),
                            device_token: str = Form(""), water_level: int | None = Form(None),
                            flow_rate: float | None = Form(None), flow_status: str | None = Form(None),
-                           device_mode: str = Form("active"), flash_on: bool = Form(False)) -> dict[str, Any]:
+                           device_mode: str = Form("active"), flash_on: bool = Form(False),
+                           camera_ready: bool = Form(False)) -> dict[str, Any]:
     """Update live device state without storing every heartbeat as a capture."""
     devices = devices_config()
     if device_id not in devices:
@@ -728,11 +776,11 @@ async def create_telemetry(device_id: str = Form(...), captured_at: str = Form(.
     if reasons and alert_status != "cooldown":
         mark_alert_sent(device_id)
     with db() as conn:
-        conn.execute("""INSERT INTO device_status(device_id,last_seen,device_mode,water_level,flow_rate,flow_status,flash_on,flash_requested)
-            VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET last_seen=excluded.last_seen,
+        conn.execute("""INSERT INTO device_status(device_id,last_seen,device_mode,water_level,flow_rate,flow_status,flash_on,flash_requested,camera_ready)
+            VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET last_seen=excluded.last_seen,
             device_mode=excluded.device_mode,water_level=excluded.water_level,flow_rate=excluded.flow_rate,
-            flow_status=excluded.flow_status,flash_on=excluded.flash_on""",
-            (device_id, received_at, device_mode, water_level, flow_rate, flow_status, int(flash_on), int(flash_on)))
+            flow_status=excluded.flow_status,flash_on=excluded.flash_on,camera_ready=excluded.camera_ready""",
+            (device_id, received_at, device_mode, water_level, flow_rate, flow_status, int(flash_on), int(flash_on), int(camera_ready)))
         if reasons and alert_sent:
             conn.execute("""INSERT INTO captures(id,device_id,captured_at,received_at,image_path,annotated_path,
                 model_status,coverage,alert_threshold,alert_sent,alert_status,detections_json,error,

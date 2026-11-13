@@ -101,6 +101,7 @@ void sendTestHeartbeat() {
   body += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"device_token\"\r\n\r\n" + String(DEVICE_TOKEN) + "\r\n";
   body += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"device_mode\"\r\n\r\nactive\r\n";
   body += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"flash_on\"\r\n\r\n" + String(flashOn ? "true" : "false") + "\r\n";
+  body += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"camera_ready\"\r\n\r\n" + String(cameraReady ? "true" : "false") + "\r\n";
   body += "--" + boundary + "--\r\n";
 
   WiFiClientSecure secure;
