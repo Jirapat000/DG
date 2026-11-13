@@ -126,6 +126,14 @@ def init_db() -> None:
             capture_id TEXT, result_json TEXT, error TEXT
         )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_capture_commands_device_status ON capture_commands(device_id, status, created_at)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS device_status (
+            device_id TEXT PRIMARY KEY, last_seen TEXT NOT NULL, device_mode TEXT NOT NULL,
+            water_level INTEGER, flow_rate REAL, flow_status TEXT, flash_on INTEGER NOT NULL DEFAULT 0,
+            flash_requested INTEGER NOT NULL DEFAULT 1
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS alert_cooldowns (
+            device_id TEXT PRIMARY KEY, last_alert_at TEXT NOT NULL
+        )""")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(captures)")}
         for name, sql_type in (("water_level", "INTEGER"), ("flow_rate", "REAL"), ("flow_status", "TEXT")):
             if name not in columns:
@@ -344,6 +352,15 @@ def create_capture_command(device_id: str = Form("drain-01")) -> dict[str, Any]:
     command_id = str(uuid.uuid4())
     with db() as conn:
         conn.execute("DELETE FROM capture_commands WHERE created_at < ?", ((datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),))
+        device_state = conn.execute("SELECT device_mode,last_seen FROM device_status WHERE device_id=?", (device_id,)).fetchone()
+        if device_state:
+            if device_state["device_mode"] == "deep_sleep":
+                raise HTTPException(409, "Device is in deep sleep. Wake it with the float switch before requesting a capture.")
+            last_seen = datetime.fromisoformat(device_state["last_seen"])
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - last_seen > timedelta(seconds=45):
+                raise HTTPException(409, "Device is offline. Reconnect the ESP32-CAM before requesting a capture.")
         conn.execute("UPDATE capture_commands SET status='expired',updated_at=? WHERE device_id=? AND status='claimed' AND updated_at < ?",
                      (now, device_id, (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()))
         active = conn.execute("SELECT id,status FROM capture_commands WHERE device_id=? AND status IN ('queued','claimed') ORDER BY created_at DESC LIMIT 1", (device_id,)).fetchone()
@@ -433,7 +450,18 @@ def alert_cooldown_ok(device_id: str) -> bool:
             "SELECT received_at FROM captures WHERE device_id=? AND alert_sent=1 ORDER BY received_at DESC LIMIT 1",
             (device_id,),
         ).fetchone()
-    return not latest or datetime.now(timezone.utc) - datetime.fromisoformat(latest[0]) >= timedelta(minutes=COOLDOWN_MINUTES)
+        state_alert = conn.execute("SELECT last_alert_at FROM alert_cooldowns WHERE device_id=?", (device_id,)).fetchone()
+    latest_at = latest[0] if latest else None
+    if state_alert and (not latest_at or state_alert[0] > latest_at):
+        latest_at = state_alert[0]
+    return not latest_at or datetime.now(timezone.utc) - datetime.fromisoformat(latest_at) >= timedelta(minutes=COOLDOWN_MINUTES)
+
+
+def mark_alert_sent(device_id: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with db() as conn:
+        conn.execute("INSERT INTO alert_cooldowns(device_id,last_alert_at) VALUES(?,?) "
+                     "ON CONFLICT(device_id) DO UPDATE SET last_alert_at=excluded.last_alert_at", (device_id, now))
 
 
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
@@ -455,6 +483,55 @@ def health() -> dict[str, Any]:
                           "max_image_storage_mb": MAX_CAPTURE_STORAGE_BYTES // (1024 * 1024)},
             "line_configured": bool(os.getenv("LINE_CHANNEL_ACCESS_TOKEN")),
             "line_delivery": "broadcast_to_oa_friends"}
+
+
+@app.get("/api/device-status", dependencies=[Depends(require_admin)])
+def device_status() -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    with db() as conn:
+        rows = {row["device_id"]: dict(row) for row in conn.execute("SELECT * FROM device_status")}
+    result = []
+    for device_id, device in devices_config().items():
+        row = rows.get(device_id)
+        if not row:
+            result.append({"id": device_id, "name": device.get("name", device_id),
+                           "location": device.get("location", ""), "connection": "offline",
+                           "mode": "unknown", "last_seen": None, "water_level": None,
+                           "flow_rate": None, "flow_status": None, "flash_on": False,
+                           "flash_requested": True})
+            continue
+        seen = datetime.fromisoformat(row["last_seen"])
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        connection = "sleeping" if row["device_mode"] == "deep_sleep" else (
+            "online" if now - seen <= timedelta(seconds=45) else "offline")
+        result.append({"id": device_id, "name": device.get("name", device_id),
+                       "location": device.get("location", ""), "connection": connection,
+                       "mode": row["device_mode"], "last_seen": row["last_seen"],
+                       "water_level": row["water_level"], "flow_rate": row["flow_rate"],
+                       "flow_status": row["flow_status"], "flash_on": bool(row["flash_on"]),
+                       "flash_requested": bool(row["flash_requested"])})
+    return result
+
+
+@app.post("/api/devices/{device_id}/flash", dependencies=[Depends(require_admin)])
+def request_flash(device_id: str, enabled: bool = Form(...)) -> dict[str, Any]:
+    if device_id not in devices_config():
+        raise HTTPException(404, "Unknown device")
+    with db() as conn:
+        conn.execute("INSERT INTO device_status(device_id,last_seen,device_mode,flash_requested) VALUES(?,?,?,?) "
+                     "ON CONFLICT(device_id) DO UPDATE SET flash_requested=excluded.flash_requested",
+                     (device_id, "1970-01-01T00:00:00+00:00", "unknown", int(enabled)))
+        row = conn.execute("SELECT flash_on,device_mode FROM device_status WHERE device_id=?", (device_id,)).fetchone()
+    return {"device_id": device_id, "requested": enabled, "applied": bool(row["flash_on"]), "mode": row["device_mode"]}
+
+
+@app.get("/api/devices/{device_id}/flash-desired", response_class=PlainTextResponse)
+def desired_flash(device_id: str, x_device_token: str = Header(default="")) -> str:
+    require_device_token(device_id, x_device_token)
+    with db() as conn:
+        row = conn.execute("SELECT flash_requested FROM device_status WHERE device_id=?", (device_id,)).fetchone()
+    return "OFF" if row and not row["flash_requested"] else "ON"
 
 
 @app.post("/api/test-image", dependencies=[Depends(require_admin)])
@@ -568,6 +645,9 @@ async def create_capture(device_id: str = Form(...), captured_at: str = Form(...
         else:
             alert_status = "cooldown"
 
+    if reasons and alert_status != "cooldown":
+        mark_alert_sent(device_id)
+
     received_at = datetime.now(timezone.utc).isoformat()
     with db() as conn:
         conn.execute("""INSERT INTO captures(id,device_id,captured_at,received_at,image_path,annotated_path,
@@ -594,8 +674,9 @@ async def create_capture(device_id: str = Form(...), captured_at: str = Form(...
 @app.post("/api/telemetry")
 async def create_telemetry(device_id: str = Form(...), captured_at: str = Form(...),
                            device_token: str = Form(""), water_level: int | None = Form(None),
-                           flow_rate: float | None = Form(None), flow_status: str | None = Form(None)) -> dict[str, Any]:
-    """Store sensor-only events, including no-flow alerts before the camera sleeps."""
+                           flow_rate: float | None = Form(None), flow_status: str | None = Form(None),
+                           device_mode: str = Form("active"), flash_on: bool = Form(False)) -> dict[str, Any]:
+    """Update live device state without storing every heartbeat as a capture."""
     devices = devices_config()
     if device_id not in devices:
         raise HTTPException(404, "Unknown device")
@@ -608,6 +689,8 @@ async def create_telemetry(device_id: str = Form(...), captured_at: str = Form(.
         raise HTTPException(422, "Invalid sensor values")
     if flow_status not in (None, "ok", "slow", "no_flow"):
         raise HTTPException(422, "Invalid flow_status")
+    if device_mode not in {"active", "deep_sleep", "standby"}:
+        raise HTTPException(422, "device_mode must be active, deep_sleep, or standby")
     try:
         timestamp = datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
         if timestamp.tzinfo is None:
@@ -625,14 +708,22 @@ async def create_telemetry(device_id: str = Form(...), captured_at: str = Form(.
                 flow_rate, flow_status, " / ".join(reasons))
         else:
             alert_status = "cooldown"
+    if reasons and alert_status != "cooldown":
+        mark_alert_sent(device_id)
     with db() as conn:
-        conn.execute("""INSERT INTO captures(id,device_id,captured_at,received_at,image_path,annotated_path,
-            model_status,coverage,alert_threshold,alert_sent,alert_status,detections_json,error,
-            water_level,flow_rate,flow_status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (capture_id, device_id, timestamp.astimezone(timezone.utc).isoformat(), received_at, "", None,
-             "sensor_only", None, THRESHOLD, int(alert_sent), alert_status, "[]", None,
-             water_level, flow_rate, flow_status))
-    return {"id": capture_id, "device_id": device_id, "model_status": "sensor_only",
+        conn.execute("""INSERT INTO device_status(device_id,last_seen,device_mode,water_level,flow_rate,flow_status,flash_on)
+            VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET last_seen=excluded.last_seen,
+            device_mode=excluded.device_mode,water_level=excluded.water_level,flow_rate=excluded.flow_rate,
+            flow_status=excluded.flow_status,flash_on=excluded.flash_on""",
+            (device_id, received_at, device_mode, water_level, flow_rate, flow_status, int(flash_on)))
+        if reasons and alert_sent:
+            conn.execute("""INSERT INTO captures(id,device_id,captured_at,received_at,image_path,annotated_path,
+                model_status,coverage,alert_threshold,alert_sent,alert_status,detections_json,error,
+                water_level,flow_rate,flow_status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (capture_id, device_id, timestamp.astimezone(timezone.utc).isoformat(), received_at, "", None,
+                 "sensor_event", None, THRESHOLD, int(alert_sent), alert_status, "[]", None,
+                 water_level, flow_rate, flow_status))
+    return {"id": capture_id, "device_id": device_id, "model_status": "sensor_event",
             "alert_sent": alert_sent, "alert_status": alert_status}
 
 
