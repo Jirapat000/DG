@@ -429,7 +429,7 @@ def poll_test_control(device_id: str, x_device_token: str = Header(default="")) 
     return f"FLASH={flash};CAPTURE={capture_id}"
 
 
-def send_line_alert(device: dict[str, Any], device_id: str, coverage: float, image_url: str,
+def send_line_alert(device: dict[str, Any], device_id: str, coverage: float | None, image_url: str,
                     water_level: int | None = None, flow_rate: float | None = None,
                     flow_status: str | None = None, alert_reason: str = "ขยะเกินเกณฑ์") -> tuple[bool, str]:
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
@@ -744,19 +744,17 @@ async def create_capture(device_id: str = Form(...), captured_at: str = Form(...
              analysis["status"], analysis["coverage"], THRESHOLD, 0, "pending",
              json.dumps(analysis["detections"]), analysis["error"], water_level, flow_rate, flow_status))
 
-    reasons = alert_reasons(analysis["coverage"], water_level, flow_status)
-    alert_sent, alert_status = False, "not_triggered"
-    if reasons:
-        if alert_cooldown_ok(device_id):
-            alert_sent, alert_status = await run_in_threadpool(
-                send_line_alert, devices[device_id], device_id, analysis["coverage"],
-                public_capture_image_path(capture_id), water_level,
-                flow_rate, flow_status, " / ".join(reasons))
-        else:
-            alert_status = "cooldown"
-
-    if alert_sent:
-        mark_alert_sent(device_id)
+    coverage = analysis["coverage"]
+    if coverage is None:
+        capture_status = "วิเคราะห์ภาพไม่สำเร็จ"
+    elif coverage > 0:
+        capture_status = "พบขยะ"
+    else:
+        capture_status = "ไม่พบขยะ"
+    alert_sent, alert_status = await run_in_threadpool(
+        send_line_alert, devices[device_id], device_id, coverage,
+        public_capture_image_path(capture_id), water_level,
+        flow_rate, flow_status, capture_status)
 
     with db() as conn:
         conn.execute("UPDATE captures SET alert_sent=?,alert_status=? WHERE id=?",

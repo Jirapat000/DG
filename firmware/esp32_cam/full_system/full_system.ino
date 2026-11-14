@@ -18,7 +18,7 @@ static const float FLOW_SLOW_LPM = 1.0f;
 static const uint32_t FLOW_SAMPLE_MS = 5000;
 static const uint32_t TELEMETRY_INTERVAL_MS = 5000;
 static const uint32_t COMMAND_INTERVAL_MS = 5000;
-static const uint32_t CAPTURE_INTERVAL_MS = 5UL * 60UL * 1000UL;
+static const uint32_t CAPTURE_INTERVAL_MS = 60UL * 1000UL;
 static const uint32_t WIFI_TIMEOUT_MS = 30000;
 
 // AI Thinker ESP32-CAM pin map.
@@ -32,7 +32,6 @@ static bool cameraReady = false, flashOn = false, lastWaterPresent = false;
 static float flowRateLpm = 0.0f;
 static uint32_t lastFlowSample = 0, lastTelemetry = 0, lastCommandPoll = 0;
 static uint32_t lastCapture = 0;
-static bool hasCapturedSinceWet = false;
 
 void IRAM_ATTR countFlowPulse() { ++flowPulseCount; }
 
@@ -201,7 +200,6 @@ bool captureAndUpload(const String &commandId = "") {
   if (sent != total) { client.stop(); Serial.printf("Upload incomplete: %u/%u\n", (unsigned)sent, (unsigned)total); return false; }
   // A proxy may send a valid body without a readable status line; do not retry
   // a fully transmitted image or a real water event could create duplicates.
-  lastCapture = millis(); hasCapturedSinceWet = true;
   String status = client.readStringUntil('\n'); status.trim();
   Serial.printf("CAPTURE API: %s\n", status.length() ? status.c_str() : "no HTTP status received");
   String response;
@@ -255,7 +253,7 @@ void setup() {
   pollFlashControl();
   const bool water = digitalRead(FLOAT_PIN) == FLOAT_WATER_LEVEL;
   lastWaterPresent = water;
-  if (water && cameraReady) captureAndUpload();
+  lastCapture = millis() - CAPTURE_INTERVAL_MS;
   Serial.printf("Ready; always active; water=%s\n", water ? "yes" : "no");
 }
 
@@ -269,9 +267,9 @@ void loop() {
   if (waterPresent != lastWaterPresent) {
     Serial.printf("FLOAT: %s\n", waterPresent ? "water detected" : "water absent");
     lastWaterPresent = waterPresent;
-    if (waterPresent) hasCapturedSinceWet = false;
   }
-  if (waterPresent && cameraReady && (!hasCapturedSinceWet || now - lastCapture >= CAPTURE_INTERVAL_MS)) {
+  if (cameraReady && now - lastCapture >= CAPTURE_INTERVAL_MS) {
+    lastCapture = now;
     captureAndUpload();
   }
   if (now - lastTelemetry >= TELEMETRY_INTERVAL_MS) {

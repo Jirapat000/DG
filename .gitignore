@@ -5,6 +5,8 @@
 !.env.production.example
 firmware/esp32_cam/secrets.h
 firmware/esp32_cam/camera_only/secrets.h
+firmware/esp32_cam/full_system/secrets.h
+firmware/esp32_cam/test_one_shot/secrets.h
 .venv/
 .runtime/
 __pycache__/
