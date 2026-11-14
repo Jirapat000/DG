@@ -3,8 +3,6 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <time.h>
-#include "esp_sleep.h"
-#include "driver/rtc_io.h"
 #include "secrets.h"
 
 // Full DrainWatch node: camera + 52 mm float + pulse flow sensor.
@@ -21,7 +19,6 @@ static const uint32_t FLOW_SAMPLE_MS = 5000;
 static const uint32_t TELEMETRY_INTERVAL_MS = 5000;
 static const uint32_t COMMAND_INTERVAL_MS = 5000;
 static const uint32_t CAPTURE_INTERVAL_MS = 5UL * 60UL * 1000UL;
-static const uint32_t NO_WATER_SLEEP_MS = 10UL * 60UL * 1000UL;
 static const uint32_t WIFI_TIMEOUT_MS = 30000;
 
 // AI Thinker ESP32-CAM pin map.
@@ -32,10 +29,9 @@ static const int Y5_GPIO_NUM = 21, Y4_GPIO_NUM = 19, Y3_GPIO_NUM = 18, Y2_GPIO_N
 
 static volatile uint32_t flowPulseCount = 0;
 static bool cameraReady = false, flashOn = false, lastWaterPresent = false;
-static bool sleepGuardInitialized = false, sleepConfirmed = false;
 static float flowRateLpm = 0.0f;
-static uint32_t lastFlowSample = 0, lastTelemetry = 0, lastCommandPoll = 0, lastSleepCheck = 0, lastGuardReset = 0;
-static uint32_t lastCapture = 0, noWaterSince = 0;
+static uint32_t lastFlowSample = 0, lastTelemetry = 0, lastCommandPoll = 0;
+static uint32_t lastCapture = 0;
 static bool hasCapturedSinceWet = false;
 
 void IRAM_ATTR countFlowPulse() { ++flowPulseCount; }
@@ -92,8 +88,8 @@ bool setupCamera() {
   config.pin_href = 23; config.pin_sccb_sda = SIOD_GPIO_NUM; config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM; config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000; config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = psramFound() ? FRAMESIZE_SVGA : FRAMESIZE_VGA;
-  config.jpeg_quality = 12; config.fb_count = psramFound() ? 2 : 1;
+  config.frame_size = FRAMESIZE_VGA;
+  config.jpeg_quality = 12; config.fb_count = 1;
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
   const esp_err_t err = esp_camera_init(&config);
@@ -133,7 +129,8 @@ bool uploadTelemetry(const char *mode) {
   body += multipartField(boundary, "device_token", DEVICE_TOKEN);
   body += multipartField(boundary, "water_level", water ? "1" : "0");
   body += multipartField(boundary, "flow_rate", String(flowRateLpm, 3));
-  body += multipartField(boundary, "flow_status", flowStatus());
+  // No-flow is expected while the float is dry; do not create false alerts.
+  if (water || flowRateLpm > 0.01f) body += multipartField(boundary, "flow_status", flowStatus());
   body += multipartField(boundary, "device_mode", mode);
   body += multipartField(boundary, "flash_on", flashOn ? "true" : "false");
   body += multipartField(boundary, "camera_ready", cameraReady ? "true" : "false");
@@ -167,51 +164,6 @@ void pollFlashControl() {
   else if (desired == "OFF" && flashOn) applyFlash(false);
 }
 
-bool resetSleepConfirmation() {
-  if (!connectWiFi()) return false;
-  WiFiClientSecure secure; secure.setCACert(ROOT_CA);
-  HTTPClient http;
-  const String url = String("https://") + API_HOST + "/api/devices/" + DEVICE_ID + "/sleep-confirmation/reset";
-  if (!http.begin(secure, url)) return false;
-  http.setConnectTimeout(10000); http.setTimeout(10000);
-  http.addHeader("X-Device-Token", DEVICE_TOKEN);
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-  const int code = http.POST(String("camera_ready=") + (cameraReady ? "true" : "false"));
-  const String response = code > 0 ? http.getString() : HTTPClient::errorToString(code);
-  http.end();
-  if (code >= 200 && code < 300) {
-    sleepGuardInitialized = true; sleepConfirmed = false;
-    Serial.println("SLEEP GUARD: reset; waiting for dashboard readiness confirmation");
-    return true;
-  }
-  Serial.printf("SLEEP GUARD RESET FAILED: HTTP %d %s\n", code, response.substring(0, 120).c_str());
-  return false;
-}
-
-void pollSleepConfirmation() {
-  if (!sleepGuardInitialized || !connectWiFi()) return;
-  WiFiClientSecure secure; secure.setCACert(ROOT_CA);
-  HTTPClient http;
-  const String url = String("https://") + API_HOST + "/api/devices/" + DEVICE_ID + "/sleep-confirmation";
-  if (!http.begin(secure, url)) return;
-  http.setConnectTimeout(10000); http.setTimeout(10000);
-  http.addHeader("X-Device-Token", DEVICE_TOKEN);
-  const int code = http.GET();
-  String value = code == 200 ? http.getString() : "";
-  http.end(); value.trim();
-  if (code != 200) {
-    Serial.printf("SLEEP GUARD POLL FAILED: HTTP %d\n", code);
-    sleepConfirmed = false;
-    return;
-  }
-  const bool confirmed = value == "READY";
-  if (confirmed != sleepConfirmed) {
-    Serial.printf("SLEEP GUARD: %s\n", confirmed ? "confirmed; sleep allowed after idle rule" : "not confirmed; sleep blocked");
-    if (confirmed) noWaterSince = millis(); // Start a fresh 10-minute idle window after the user confirms readiness.
-  }
-  sleepConfirmed = confirmed;
-}
-
 bool captureAndUpload(const String &commandId = "") {
   if (!cameraReady || !connectWiFi()) return false;
   const String stamp = isoTimestamp();
@@ -235,7 +187,7 @@ bool captureAndUpload(const String &commandId = "") {
   start += multipartField(boundary, "device_token", DEVICE_TOKEN);
   start += multipartField(boundary, "water_level", water ? "1" : "0");
   start += multipartField(boundary, "flow_rate", String(flowRateLpm, 3));
-  start += multipartField(boundary, "flow_status", flowStatus());
+  if (water || flowRateLpm > 0.01f) start += multipartField(boundary, "flow_status", flowStatus());
   if (commandId.length()) start += multipartField(boundary, "command_id", commandId);
   start += "--" + boundary + "\r\nContent-Disposition: form-data; name=\"image\"; filename=\"drain-camera.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n";
   const String end = "\r\n--" + boundary + "--\r\n";
@@ -284,32 +236,10 @@ void pollWebCapture() {
   }
 }
 
-void enterDeepSleep() {
-  if (!sleepGuardInitialized || !sleepConfirmed) {
-    Serial.println("Sleep blocked: waiting for dashboard readiness confirmation.");
-    return;
-  }
-  Serial.println("No float water and no flow for 10 minutes; reporting deep sleep.");
-  applyFlash(false);
-  if (!uploadTelemetry("deep_sleep")) {
-    Serial.println("Sleep aborted: backend did not confirm deep-sleep status; retrying while awake.");
-    return;
-  }
-  if (cameraReady) { esp_camera_deinit(); cameraReady = false; }
-  WiFi.disconnect(true); WiFi.mode(WIFI_OFF);
-  rtc_gpio_init(GPIO_NUM_14);
-  rtc_gpio_set_direction(GPIO_NUM_14, RTC_GPIO_MODE_INPUT_ONLY);
-  rtc_gpio_pullup_en(GPIO_NUM_14); rtc_gpio_pulldown_dis(GPIO_NUM_14);
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_14, 0); // Float closes to GND when water rises.
-  Serial.flush();
-  esp_deep_sleep_start();
-}
-
 void setup() {
   Serial.begin(115200); delay(300);
   Serial.println("\n=== DrainWatch full ESP32-CAM node ===");
   Serial.println("Float=GPIO14 (active LOW); flow pulse=GPIO13; flash=GPIO4");
-  rtc_gpio_deinit(GPIO_NUM_14);
   pinMode(FLOAT_PIN, INPUT_PULLUP); pinMode(FLOW_PIN, INPUT_PULLUP);
   pinMode(FLASH_LED_PIN, OUTPUT); digitalWrite(FLASH_LED_PIN, LOW);
   if (BOOT_FLASH_SIGNAL_ENABLED) flashBootSignal();
@@ -319,17 +249,14 @@ void setup() {
   else cameraReady = true;
   Serial.printf("CAMERA: %s | PSRAM=%s | FREE_HEAP=%u\n",
                 cameraReady ? "ready" : "failed", psramFound() ? "yes" : "no", ESP.getFreeHeap());
-  if (connectWiFi()) resetSleepConfirmation();
-  else Serial.println("Wi-Fi unavailable; staying awake and retrying; deep sleep remains blocked");
-  lastGuardReset = millis();
+  if (!connectWiFi()) Serial.println("Wi-Fi unavailable; staying awake and retrying");
   lastFlowSample = millis(); lastTelemetry = millis() - TELEMETRY_INTERVAL_MS;
-  lastCommandPoll = millis(); lastSleepCheck = millis();
+  lastCommandPoll = millis();
   pollFlashControl();
   const bool water = digitalRead(FLOAT_PIN) == FLOAT_WATER_LEVEL;
   lastWaterPresent = water;
-  noWaterSince = millis();
-  if (water && cameraReady) captureAndUpload(); // Capture promptly when float wakes the board.
-  Serial.printf("Ready; wake cause=%d; water=%s\n", (int)esp_sleep_get_wakeup_cause(), water ? "yes" : "no");
+  if (water && cameraReady) captureAndUpload();
+  Serial.printf("Ready; always active; water=%s\n", water ? "yes" : "no");
 }
 
 void loop() {
@@ -337,19 +264,13 @@ void loop() {
     connectWiFi();
   }
   const uint32_t now = millis();
-  if (WiFi.status() == WL_CONNECTED && !sleepGuardInitialized && now - lastGuardReset >= COMMAND_INTERVAL_MS) {
-    lastGuardReset = now;
-    resetSleepConfirmation();
-  }
   sampleFlow(now);
   const bool waterPresent = digitalRead(FLOAT_PIN) == FLOAT_WATER_LEVEL;
   if (waterPresent != lastWaterPresent) {
     Serial.printf("FLOAT: %s\n", waterPresent ? "water detected" : "water absent");
     lastWaterPresent = waterPresent;
-    if (waterPresent) { noWaterSince = now; hasCapturedSinceWet = false; }
+    if (waterPresent) hasCapturedSinceWet = false;
   }
-  if (waterPresent || flowRateLpm > 0.01f) noWaterSince = now;
-
   if (waterPresent && cameraReady && (!hasCapturedSinceWet || now - lastCapture >= CAPTURE_INTERVAL_MS)) {
     captureAndUpload();
   }
@@ -361,16 +282,6 @@ void loop() {
     lastCommandPoll = now;
     pollFlashControl();
     pollWebCapture();
-  }
-  if (now - lastSleepCheck >= COMMAND_INTERVAL_MS) {
-    lastSleepCheck = now;
-    pollSleepConfirmation();
-  }
-  if (!waterPresent && flowRateLpm <= 0.01f && now - noWaterSince >= NO_WATER_SLEEP_MS) {
-    if (sleepGuardInitialized && sleepConfirmed) enterDeepSleep();
-    else if (now - noWaterSince < NO_WATER_SLEEP_MS + COMMAND_INTERVAL_MS) {
-      Serial.println("Idle rule met, but deep sleep is blocked until user confirms readiness on dashboard.");
-    }
   }
   delay(30);
 }
