@@ -3,6 +3,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <time.h>
+#include "esp_system.h"
 #include "secrets.h"
 
 // One-shot ESP32-CAM diagnostic. Type c in Serial Monitor to capture/upload once.
@@ -43,9 +44,10 @@ bool setupCamera() {
   config.pin_pwdn = PWDN_GPIO_NUM; config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = psramFound() ? FRAMESIZE_SVGA : FRAMESIZE_VGA;
+  // Bring-up mode: VGA and a single framebuffer reduce startup workload.
+  config.frame_size = FRAMESIZE_VGA;
   config.jpeg_quality = 12;
-  config.fb_count = psramFound() ? 2 : 1;
+  config.fb_count = 1;
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
   esp_err_t err = esp_camera_init(&config);
@@ -56,6 +58,7 @@ bool setupCamera() {
 bool connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return true;
   WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("Connecting to Wi-Fi '%s'", WIFI_SSID);
   const uint32_t started = millis();
@@ -250,6 +253,7 @@ void setup() {
   Serial.begin(115200);
   delay(700);
   Serial.println("\n=== DrainGuard ESP32-CAM one-shot test ===");
+  Serial.printf("RESET REASON: %d\n", (int)esp_reset_reason());
   Serial.println("No sensors. No periodic capture. No automatic retries.");
   Serial.println("Battery test: Wi-Fi stays online; web page can toggle flash and request a capture.");
   Serial.println("Type c + Enter for a local one-shot capture; type i for status.");
