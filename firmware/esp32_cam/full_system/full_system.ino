@@ -12,6 +12,8 @@
 static const int FLOAT_PIN = 14;
 static const int FLOW_PIN = 13;
 static const int FLASH_LED_PIN = 4;
+// Keep the high-current flash off during bring-up; enable after the supply is stable.
+static const bool BOOT_FLASH_SIGNAL_ENABLED = false;
 static const int FLOAT_WATER_LEVEL = LOW; // Float closes GPIO14 to GND when water rises.
 static const float FLOW_PULSES_PER_LITER = 450.0f; // Calibrate for the actual flow meter.
 static const float FLOW_SLOW_LPM = 1.0f;
@@ -309,7 +311,9 @@ void setup() {
   Serial.println("Float=GPIO14 (active LOW); flow pulse=GPIO13; flash=GPIO4");
   rtc_gpio_deinit(GPIO_NUM_14);
   pinMode(FLOAT_PIN, INPUT_PULLUP); pinMode(FLOW_PIN, INPUT_PULLUP);
-  pinMode(FLASH_LED_PIN, OUTPUT); digitalWrite(FLASH_LED_PIN, LOW); flashBootSignal();
+  pinMode(FLASH_LED_PIN, OUTPUT); digitalWrite(FLASH_LED_PIN, LOW);
+  if (BOOT_FLASH_SIGNAL_ENABLED) flashBootSignal();
+  else Serial.println("BOOT SIGNAL: flash skipped for low-power bring-up");
   attachInterrupt(digitalPinToInterrupt(FLOW_PIN), countFlowPulse, FALLING);
   if (!setupCamera()) { Serial.println("Camera unavailable; sensor telemetry continues"); }
   else cameraReady = true;
